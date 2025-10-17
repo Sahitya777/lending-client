@@ -1,6 +1,7 @@
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
 import MagicBento from "@/components/MagicBento";
+import HomeScreenDashboard from "@/components/HomescreenDashboard";
 export default function Home() {
 
 const cardData = [
@@ -42,12 +43,13 @@ const cardData = [
   }
 ];
   return (
-    <div>
-      <Navbar />
+    <div className="bg-[#F8F8F8]">
       <div className="flex gap-8">
         <Sidebar />
-        <main className="flex-1 bg-slate-50">
-          <MagicBento
+        <main className="flex-1">
+          <Navbar/>
+          <HomeScreenDashboard data={undefined}/>
+          {/* <MagicBento
             textAutoHide={true}
             enableStars={true}
             enableSpotlight={true}
@@ -59,7 +61,7 @@ const cardData = [
             particleCount={12}
             glowColor="132, 0, 255"
             cardData={cardData}
-          />
+          /> */}
         </main>
       </div>
     </div>

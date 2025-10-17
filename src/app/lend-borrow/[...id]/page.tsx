@@ -5,11 +5,11 @@ import React from "react";
 
 const page = () => {
     return (
-    <div>
-      <Navbar />
+    <div className="bg-[#F8F8F8]">
       <div className="flex gap-8">
         <Sidebar />
-        <main className="flex-1 bg-slate-50">
+        <main className="flex-1">
+          <Navbar/>
             <TokenActionDashboard/>
         </main>
       </div>

@@ -27,7 +27,7 @@ const page = () => {
 
   return (
     <div>
-      <Navbar />
+      {/* <Navbar /> */}
       <div className="flex gap-8">
         <Sidebar />
         <main className="flex-1 bg-slate-50">

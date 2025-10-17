@@ -3,7 +3,10 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { LayoutDashboard, Layers, Coins, MoreHorizontal } from "lucide-react";
+import LayoutDashboard from '../../assets/icons/dashboard.png'
+import Layers from '../../assets/icons/lend-borrow.png'
+import vault from '../../assets/icons/strategicvault.png'
+import more from '../../assets/icons/more.png'
 import SplitText from "@/components/SplitText";
 import { Button } from "@/components/ui/button";
 import { GoPin } from "react-icons/go";
@@ -11,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { Connection, clusterApiUrl } from "@solana/web3.js";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-
+import Image from "next/image";
 const PIN_KEY = "ui.sidebar.pinned";
 
 export default function Sidebar() {
@@ -93,8 +96,8 @@ export default function Sidebar() {
   const sideBaritems = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/" },
     { icon: Layers, label: "Lend & Borrow", href: "/lend-borrow" },
-    { icon: Coins, label: "Strategic Vaults", href: "/strategic-vaults" },
-    { icon: MoreHorizontal, label: "More" },
+    { icon: vault, label: "Strategic Vaults", href: "/strategic-vaults" },
+    { icon: more, label: "More" },
   ];
 
   const dotColor =
@@ -108,7 +111,7 @@ export default function Sidebar() {
       animate={{ width: expanded ? 220 : 72 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
       className={cn(
-        "h-[80vh] bg-[#0f172a] text-white flex flex-col justify-between shadow-lg sticky top-0 left-5 rounded-md"
+        "h-[100vh] bg-[white] text-black flex flex-col justify-between shadow-lg sticky top-0 left-0"
       )}
     >
       <div>
@@ -121,8 +124,8 @@ export default function Sidebar() {
           >
             {expanded && (
               <SplitText
-                text="Lending Protocol"
-                className="text-xl font-semibold text-center"
+                text="OwlFi"
+                className="text-xl font-semibold text-center ml-4"
                 delay={100}
                 duration={0.6}
                 ease="power3.out"
@@ -145,22 +148,22 @@ export default function Sidebar() {
             }}
             className="text-gray-400 cursor-pointer hover:bg-transparent hover:text-gray-600"
           >
-            {pinned ? <GoPin className="text-white" size={18} /> : <GoPin size={18} />}
+            {pinned ? <GoPin className="text-black" size={18} /> : <GoPin size={18} />}
           </Button>
         </div>
 
         {/* Nav */}
-        <nav className="space-y-1 mt-4">
+        <nav className="space-y-2 mt-4 px-4">
           {sideBaritems.map((item, i) => (
             <button
               key={i}
               onClick={() => item.href && router.replace(item.href)}
               className={cn(
-                "flex items-center gap-3 w-full px-3 py-2 rounded-md cursor-pointer hover:bg-[#1e293b] transition-colors",
+                "flex items-center gap-2 w-full px-3 py-2 rounded-md cursor-pointer hover:bg-slate-200 transition-colors",
                 expanded ? "justify-start" : "justify-center"
               )}
             >
-              <item.icon size={20} />
+              <Image src={item.icon} alt="it" />
               {expanded && <span>{item.label}</span>}
             </button>
           ))}
@@ -179,7 +182,7 @@ export default function Sidebar() {
             href={`https://explorer.solana.com/block/${blockHeight}?cluster=testnet`}
             target="_blank"
           >
-            <span className="text-sm text-gray-300 cursor-pointer hover:underline">
+            <span className="text-sm text-black cursor-pointer hover:underline">
               {blockHeight ? `${blockHeight}` : "Loading…"}
             </span>
           </Link>

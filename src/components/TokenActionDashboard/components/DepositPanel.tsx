@@ -28,6 +28,7 @@ import {
   fetchSolBalanceSOL,
   buildApproveAndDepositSolTx,
   fetchSplTokenBalance,
+  buildDepositSolTx,
 } from "@/utils/chain/solana";
 
 function InfoRow({
@@ -76,8 +77,12 @@ export default function DepositPanel({
 
   // Resolve Solana public key from Dynamic
   React.useEffect(() => {
-    console.log('entry')
-    if (primaryWallet && isSolanaWallet(primaryWallet) && primaryWallet.address) {
+    console.log("entry");
+    if (
+      primaryWallet &&
+      isSolanaWallet(primaryWallet) &&
+      primaryWallet.address
+    ) {
       try {
         setPubkey(new PublicKey(primaryWallet.address));
       } catch {
@@ -102,10 +107,12 @@ export default function DepositPanel({
             ? await primaryWallet.getConnection()
             : getConnection();
         const sol = await fetchSolBalanceSOL(pubkey);
-        const NATIVE_MINT = new PublicKey("So11111111111111111111111111111111111111112");
+        const NATIVE_MINT = new PublicKey(
+          "So11111111111111111111111111111111111111112"
+        );
 
-          const bal = await fetchSplTokenBalance(pubkey, NATIVE_MINT);
-console.log("USDC balance:", bal);
+        const bal = await fetchSplTokenBalance(pubkey, NATIVE_MINT);
+        console.log("USDC balance:", bal);
         setBalance(sol);
       } catch {
         setBalance(null);
@@ -114,6 +121,7 @@ console.log("USDC balance:", bal);
   }, [pubkey, primaryWallet]);
 
   // WRITE: wrap SOL -> approve -> deposit
+
   const onApproveAndDeposit = async () => {
     if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
       setShowAuthFlow(true);
@@ -122,35 +130,28 @@ console.log("USDC balance:", bal);
 
     setBusy(true);
     setTxSig("");
-
     try {
       const value = Number(amount);
-      if (!Number.isFinite(value) || value <= 0) throw new Error("Enter a valid amount");
+      if (value <= 0) throw new Error("Enter valid amount");
 
-      const connection = await primaryWallet.getConnection();
-
-      // Build transaction (returns a prepared Transaction)
-      const { tx } = await buildApproveAndDepositSolTx({
+      const connection = getConnection();
+      console.log(connection, "connect");
+      const { tx } = await buildDepositSolTx({
         owner: pubkey,
         amountSol: value,
+        connection: connection as any,
       });
+      console.log(tx,'tx')
 
-      // Dynamic Solana signer
-      const signer = await primaryWallet.getSigner(); // ISolanaSigner
-      // Many wallets return { signature }, some return string.
+      const signer = await primaryWallet.getSigner(); // Dynamic’s Solana signer
       const res = await signer.signAndSendTransaction(tx as any);
-      const signature =
-        typeof res === "string" ? res : (res as { signature: string }).signature;
+      const sig = typeof res === "string" ? res : res.signature;
+      setTxSig(sig);
 
-      setTxSig(signature);
-
-      await connection.confirmTransaction(signature, "confirmed");
-      // Refresh balance
-      const newBal = await fetchSolBalanceSOL(pubkey);
-      setBalance(newBal);
-    } catch (e) {
-      console.error(e);
-      // Optionally toast the error
+      await connection.confirmTransaction(sig, "confirmed");
+      setBalance(await fetchSolBalanceSOL(pubkey));
+    } catch (err) {
+      console.error(err);
     } finally {
       setBusy(false);
     }
@@ -231,7 +232,10 @@ console.log("USDC balance:", bal);
               <Shield className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-medium">Use as collateral</span>
             </div>
-            <Switch checked={useCollateral} onCheckedChange={setUseCollateral} />
+            <Switch
+              checked={useCollateral}
+              onCheckedChange={setUseCollateral}
+            />
           </div>
           <InfoRow
             title="Health factor"
@@ -243,11 +247,13 @@ console.log("USDC balance:", bal);
         {/* Warning */}
         <Alert className="border-yellow-300 bg-yellow-50">
           <AlertTriangle className="h-4 w-4 text-yellow-700" />
-          <AlertTitle className="font-semibold text-yellow-800">Warning</AlertTitle>
+          <AlertTitle className="font-semibold text-yellow-800">
+            Warning
+          </AlertTitle>
           <AlertDescription className="text-sm text-yellow-800">
-            Withdrawals and borrowing depend on available supply. If funds are fully
-            borrowed, you may not be able to withdraw your full deposit. You can also
-            deposit without enabling lending to avoid restrictions.
+            Withdrawals and borrowing depend on available supply. If funds are
+            fully borrowed, you may not be able to withdraw your full deposit.
+            You can also deposit without enabling lending to avoid restrictions.
           </AlertDescription>
         </Alert>
 
@@ -268,7 +274,11 @@ console.log("USDC balance:", bal);
       </CardContent>
 
       <CardFooter>
-        <Button className="w-full" disabled={!canDeposit} onClick={onApproveAndDeposit}>
+        <Button
+          className="w-full"
+          disabled={!canDeposit}
+          onClick={onApproveAndDeposit}
+        >
           {busy ? "Processing…" : "Approve and deposit"}
         </Button>
       </CardFooter>
