@@ -1,7 +1,6 @@
-import type { NextApiRequest } from "next";
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 
-export async function POST(req: NextApiRequest) {
+export async function POST(req: NextRequest) {
   try {
     const response = await fetch(
       `https://mobile-api.opacity.network/api/app-links/create`,
