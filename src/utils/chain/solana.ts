@@ -210,7 +210,7 @@ export const RPC_ENDPOINT = clusterApiUrl("testnet");
 
 // REPLACE with your real IDs
 export const PROTOCOL_PROGRAM_ID = new PublicKey(
-  "11111111111111111111111111111111"
+  "4i28wYuQQVnbAMZekQryDTb4nAmEcDwBVRH5kZPjgRiA"
 );
 export const PROTOCOL_VAULT_PDA = new PublicKey(
   "11111111111111111111111111111111"

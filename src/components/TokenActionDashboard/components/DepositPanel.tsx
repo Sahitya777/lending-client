@@ -214,7 +214,7 @@ export default function DepositPanel({
         </div>
 
         {/* Use for lending */}
-        <div className="rounded-xl bg-muted/30 p-3 space-y-2">
+        {/* <div className="rounded-xl bg-muted/30 p-3 space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Lock className="h-4 w-4 text-muted-foreground" />
@@ -223,10 +223,10 @@ export default function DepositPanel({
             <Switch checked={useLending} onCheckedChange={setUseLending} />
           </div>
           <InfoRow title="Lending APY" right={<span>123.04%</span>} accent />
-        </div>
+        </div> */}
 
         {/* Use as collateral */}
-        <div className="rounded-xl bg-muted/30 p-3 space-y-2">
+        {/* <div className="rounded-xl bg-muted/30 p-3 space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Shield className="h-4 w-4 text-muted-foreground" />
@@ -242,7 +242,7 @@ export default function DepositPanel({
             right={<span className="text-emerald-600 font-medium">18.75</span>}
             accent
           />
-        </div>
+        </div> */}
 
         {/* Warning */}
         <Alert className="border-yellow-300 bg-yellow-50">
@@ -275,7 +275,7 @@ export default function DepositPanel({
 
       <CardFooter>
         <Button
-          className="w-full"
+          className="w-full cursor-pointer"
           disabled={!canDeposit}
           onClick={onApproveAndDeposit}
         >

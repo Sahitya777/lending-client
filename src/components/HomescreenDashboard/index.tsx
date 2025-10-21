@@ -15,6 +15,7 @@ import Image from "next/image";
 import depositPoolIcon from "../../assets/icons/depositIllust.png";
 import lendingIcon from "../../assets/icons/lendingIlust.png";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
+import DevnetWalletPanel from "../DevnetPanelWallet";
 /**
  * HomeScreenDashboard
  * ------------------------------------------------------------------
@@ -28,8 +29,8 @@ import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
  */
 export default function HomeScreenDashboard({ data }: { data: any }) {
   const d = {
-    netWorth: 0.18,
-    yieldingPositions: 0.16,
+    netWorth: 0,
+    yieldingPositions: 0,
     projected30D: 0.0, // < $0.01 visualized
     lendBorrow: {
       total: 0.08,
@@ -252,71 +253,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
           {/* Right column */}
           <div className="space-y-6 w-[35%]">
             {/* Wallet */}
-            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between p-5 border-b">
-                <h2 className="text-lg font-semibold">Wallet</h2>
-                <div className="text-sm font-medium text-gray-600">
-                  ${merged.wallet.total.toFixed(2)}
-                </div>
-              </div>
-              <div className="px-5 pb-5">
-                <div className="grid grid-cols-4 text-xs font-medium text-gray-500 px-1 pt-4 pb-2">
-                  <div>Market</div>
-                  <div className="text-right">Price</div>
-                  <div className="text-right">Amount</div>
-                  <div className="text-right">Value</div>
-                </div>
-                <div className="divide-y">
-                  {merged.wallet.rows.map((r: any) => (
-                    <div
-                      key={r.market}
-                      className="grid grid-cols-4 items-center px-1 py-3 text-sm"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="inline-flex h-5 w-5 rounded-full bg-emerald-500/10 ring-1 ring-emerald-300" />
-                        <span className="font-medium text-gray-800">
-                          {r.market}
-                        </span>
-                      </div>
-                      <div className="text-right">${r.price.toFixed(2)}</div>
-                      <div className="text-right">{r.amount.toFixed(4)}</div>
-                      <div className="text-right">${r.value.toFixed(2)}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Yield opportunities */}
-            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between p-5 border-b">
-                <h2 className="text-lg font-semibold">Yield opportunities</h2>
-                <button
-                  className="rounded-lg p-1 hover:bg-gray-100 transition"
-                  aria-label="collapse"
-                >
-                  <ChevronUp className="h-4 w-4 text-gray-500" />
-                </button>
-              </div>
-              <div className="p-2">
-                {merged.yieldOpps.map((op: any) => (
-                  <div
-                    key={op.label}
-                    className="flex items-center justify-between px-3 py-3 text-sm hover:bg-gray-50 rounded-xl"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full ring-1 ring-gray-300">
-                        <Circle className="h-3 w-3" />
-                      </span>
-                      <span className="font-medium">{op.label}</span>
-                    </div>
-                    <div className="text-right font-medium">
-                      {op.apy.toFixed(2)}%
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <DevnetWalletPanel />
           </div>
         </div>
 

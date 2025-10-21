@@ -102,7 +102,7 @@ const Navbar = () => {
           <div className="border flex gap-2 items-center border-amber-200 p-2 bg-white rounded-md">
             <Image src={solicon} alt={"sol"} height={12} width={12} className="object-contain" />
             {primaryWallet?.address?.slice(0, 5)}...
-            {primaryWallet?.address?.slice(-5)}
+            {primaryWallet?.address?.slice(-5)} (devnet)
           </div>
           <Button
             className="cursor-pointer bg-[#592EFF]"
