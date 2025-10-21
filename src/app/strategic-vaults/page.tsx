@@ -1,27 +1,32 @@
-'use client'
+"use client";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
-import React from "react";
+import React, { useState } from "react";
 
 const page = () => {
-  const createMultipassLink = async (templateId: string) => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const handleCreateLink = async () => {
+    setIsLoading(true);
+    setMessage("");
+
     try {
-      const response = await fetch(`https://mobile-api.opacity.network/api/app-links/create`, {
-      method: "POST",
-      headers: {
-      "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-      apiKey: process.env.NEXT_PBULIC_LUMANLABS_KEY,
-      templateId: templateId,
-      // flowParams: [], // Only required for flows that need parameters
-      }),
+      const response = await fetch("/api/template", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
       });
+
       const data = await response.json();
-      console.log("Multipass URL:", data.url);
-      return data.url;
+
+      window.open(data.url, "_blank");
     } catch (error) {
-      console.error("Failed to create Multipass link:", error);
+      console.error("Error:", error);
+      setMessage("An error occurred while creating the link");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -31,9 +36,11 @@ const page = () => {
       <div className="flex gap-8">
         <Sidebar />
         <main className="flex-1 bg-slate-50">
-          <div onClick={()=>{
-            createMultipassLink('04a6b0d9-65bc-4588-a0ad-c9f006e198eb')
-          }}>
+          <div
+            onClick={() => {
+              handleCreateLink();
+            }}
+          >
             Url
           </div>
         </main>
