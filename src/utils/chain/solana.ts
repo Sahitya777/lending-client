@@ -13,6 +13,7 @@ import {
 import {
   NATIVE_MINT,
   getAssociatedTokenAddressSync,
+  createRevokeInstruction,
   createAssociatedTokenAccountIdempotentInstruction,
   createSyncNativeInstruction,
   createApproveInstruction,
@@ -45,6 +46,7 @@ const findPda = (seeds: (Uint8Array | Buffer)[]) =>
 export const CORE_ROUTER_PROGRAM_ID = new PublicKey(
   "4i28wYuQQVnbAMZekQryDTb4nAmEcDwBVRH5kZPjgRiA"
 );
+export const CORE_ROUTER_DELEGATE = CORE_ROUTER_PROGRAM_ID;
 export const CORE_ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 );
@@ -137,11 +139,16 @@ export async function buildDepositSolTx({
   amountSol,
   connection = getConnection(),
   underlyingMint = NATIVE_MINT, // WSOL by default
+  // 👇 new optional knobs
+  delegate = CORE_ROUTER_DELEGATE,
+  autoRevoke = true,
 }: {
   owner: PublicKey;
   amountSol: number;
   connection?: Connection;
   underlyingMint?: PublicKey;
+  delegate?: PublicKey;   // 👈 who can pull the user's WSOL
+  autoRevoke?: boolean;   // 👈 revoke after deposit in the same tx
 }) {
   const [market] = findMarketPda(underlyingMint);
   const [supplyVault] = findSupplyVaultPda(market);
@@ -163,7 +170,17 @@ export async function buildDepositSolTx({
     ixs.push(ixInitializeUserPosition(owner, userPosition, underlyingMint));
   }
 
-  // Deposit
+  // ✅ Approve the core router (or your PDA) to pull exactly `amountLamports` from user's WSOL ATA
+  ixs.push(
+    createApproveInstruction(
+      userTokenAccount,
+      delegate,        // delegate that will do the transfer via CPI
+      owner,           // owner (authority) of the token account
+      BigInt(amountLamports)
+    )
+  );
+
+  // Deposit (your program will CPI to token program using the delegate authority)
   ixs.push(
     ixDeposit({
       signer: owner,
@@ -175,10 +192,15 @@ export async function buildDepositSolTx({
       amount: BigInt(amountLamports),
     })
   );
-  console.log("2");
+
+  // 🔒 Optional safety: revoke the approval after deposit runs in the same tx
+  if (autoRevoke) {
+    ixs.push(createRevokeInstruction(userTokenAccount, owner));
+  }
 
   const { blockhash, lastValidBlockHeight } =
     await connection.getLatestBlockhash("confirmed");
+
   const tx = new Transaction({
     feePayer: owner,
     blockhash,
@@ -187,9 +209,10 @@ export async function buildDepositSolTx({
 
   return {
     tx,
-    accounts: { market, supplyVault, userPosition, userTokenAccount },
+    accounts: { market, supplyVault, userPosition, userTokenAccount, delegate },
   };
 }
+
 
 export function findMarketPda(underlyingMint: PublicKey) {
   return findPda([te.encode("market"), underlyingMint.toBuffer()]);
