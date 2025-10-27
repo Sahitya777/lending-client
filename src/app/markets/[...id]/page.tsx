@@ -6,7 +6,7 @@ import React from "react";
 const page = () => {
     return (
     <div className="bg-[#F8F8F8]">
-      <div className="flex gap-8">
+      <div className="flex">
         <Sidebar />
         <main className="flex-1">
           <Navbar/>

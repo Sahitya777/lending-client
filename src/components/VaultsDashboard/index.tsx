@@ -39,6 +39,7 @@ const markets = [
   //   icon: ethicon,
   // },
   {
+    organization: "Solend",
     name: "SOL",
     symbol: "Solana",
     price: "$230.45",
@@ -51,6 +52,7 @@ const markets = [
     icon: solicon,
   },
   {
+    organization: "Jupiter",
     name: "USDC",
     symbol: "USD Coin",
     price: "$0.9991",
@@ -63,6 +65,7 @@ const markets = [
     icon: usdcicon,
   },
   {
+    organization: "Kamino",
     name: "USDT",
     symbol: "Tether USD",
     price: "$0.9995",
@@ -88,7 +91,7 @@ const markets = [
   // },
 ];
 
-export default function MarketDashboard() {
+export default function VaultDashboard() {
   const [currentSelectedTab, setCurrentSelectedTab] = useState<
     "All" | "Shared" | "Isolated" | "Cross"
   >("All");
@@ -103,7 +106,7 @@ export default function MarketDashboard() {
     if (currentSelectedTab === "All") return markets;
     return markets.filter((m) => m.tier === currentSelectedTab);
   }, [currentSelectedTab]);
-  const router=useRouter()
+  const router = useRouter();
 
   return (
     <div className="min-h-screen bg-[#181818] w-[96%] ml-[2%] rounded-md text-foreground">
@@ -115,22 +118,22 @@ export default function MarketDashboard() {
               <thead className="border-b border-border">
                 <tr>
                   <th className="py-5 px-6 text-left text-muted-foreground font-semibold">
+                    Organisations
+                  </th>
+                  <th className="py-5 px-6 text-left text-muted-foreground font-semibold">
                     Assets
                   </th>
                   <th className="py-5 px-6 text-right text-muted-foreground font-semibold">
-                    Max Tvl
+                    Deposit
                   </th>
                   <th className="py-5 px-6 text-right text-muted-foreground font-semibold">
-                    Supply APY
+                    Borrow
                   </th>
                   <th className="py-5 px-6 text-right text-muted-foreground font-semibold">
-                    Borrow APR
+                    LTV
                   </th>
                   <th className="py-5 px-6 text-right text-muted-foreground font-semibold">
-                    Total Supply
-                  </th>
-                  <th className="py-5 px-6 text-right text-muted-foreground font-semibold">
-                    Total Borrow
+                    Deposit APR
                   </th>
                 </tr>
               </thead>
@@ -139,8 +142,8 @@ export default function MarketDashboard() {
                   <tr
                     key={`${m.name}-${i}`}
                     className="border-b border-border hover:bg-secondary/10 transition-colors cursor-pointer"
-                    onClick={()=>{
-                      router.push(`/markets/${m.name}`)
+                    onClick={() => {
+                      router.push(`/lend-borrow/${m.name}`);
                     }}
                   >
                     <td className="py-5 px-6 flex items-center gap-3">
@@ -154,15 +157,26 @@ export default function MarketDashboard() {
                       </div>
                       <div className="flex flex-col">
                         <span className="font-semibold text-foreground">
-                          {m.name}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {m.symbol}
+                          {m.organization}
                         </span>
                       </div>
                     </td>
-                    <td className="py-5 px-6 text-right text-foreground font-medium">
-                      {m.price}
+                    <td className="text-right text-foreground font-medium">
+                      <div className="py-5 px-6 flex items-center gap-3">
+                        <div className="w-5 h-5 relative">
+                          <Image
+                            src={m.icon}
+                            alt={m.name}
+                            fill
+                            className="object-contain"
+                          />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="font-semibold text-foreground">
+                            {m.name}
+                          </span>
+                        </div>
+                      </div>
                     </td>
                     <td className="py-5 px-6 text-right text-white font-semibold">
                       {m.apy}

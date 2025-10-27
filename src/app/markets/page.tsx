@@ -9,7 +9,7 @@ const page = () => {
   return (
         <div>
       {/* <Navbar /> */}
-      <div className="flex gap-8">
+      <div className="flex">
         <Sidebar />
         <main className="flex-1">
           <Navbar/>

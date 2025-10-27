@@ -1,6 +1,7 @@
 "use client";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
+import VaultDashboard from "@/components/VaultsDashboard";
 import React, { useState } from "react";
 
 const page = () => {
@@ -33,16 +34,11 @@ const page = () => {
   return (
     <div>
       {/* <Navbar /> */}
-      <div className="flex gap-8">
+      <div className="flex">
         <Sidebar />
-        <main className="flex-1 bg-slate-50">
-          <div
-            onClick={() => {
-              handleCreateLink();
-            }}
-          >
-            Url
-          </div>
+        <main className="flex-1">
+          <Navbar/>
+          <VaultDashboard/>
         </main>
       </div>
     </div>

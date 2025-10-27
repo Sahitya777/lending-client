@@ -108,7 +108,7 @@ export default function DepositPanel({
             : getConnection();
         const sol = await fetchSolBalanceSOL(pubkey);
         const NATIVE_MINT = new PublicKey(
-          "So11111111111111111111111111111111111111112"
+          "Em9FJok1Bvfcw9JdjUAENUgqRzGKMYHMX9aNQkPG3JkV"
         );
 
         const bal = await fetchSplTokenBalance(pubkey, NATIVE_MINT);

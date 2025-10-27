@@ -55,7 +55,7 @@ const TokenActionDashboard: React.FC = () => {
     const pathname = usePathname(); // "/lend-borrow/BTC"
     const lastSegment = pathname.split("/").filter(Boolean).pop();
   return (
-    <div className="min-h-screen bg-white w-full py-12">
+    <div className="min-h-screen bg-background w-full py-12 text-foreground">
       <div className="mx-auto w-full max-w-3xl px-4">
         {/* Tabs header */}
         <Tabs defaultValue="deposit" className="w-full">
@@ -77,9 +77,9 @@ const TokenActionDashboard: React.FC = () => {
                   key={val}
                   value={val}
                   className="
-                    data-[state=active]:bg-foreground data-[state=active]:text-background cursor-pointer
-                    rounded-lg px-4 py-2 text-sm font-medium
-                    bg-white shadow-sm hover:bg-accent/60
+                    data-[state=active]:bg-primary data-[state=active]:text-background cursor-pointer
+                    rounded-lg px-4 py-2 text-sm font-medium bg-card 
+                     shadow-sm hover:bg-accent/60 border border-border hover:border-primary/50
                   "
                 >
                   {label}
