@@ -203,6 +203,11 @@ const Navbar = () => {
   };
 
   const title = useNavbarTitle();
+  const [showWalletMenu, setShowWalletMenu] = useState(false);
+  const copyAddress = async () => {
+    if (!primaryWallet?.address) return;
+    await navigator.clipboard.writeText(primaryWallet.address);
+  };
 
   return (
     <div className="px-8 py-4 flex w-full items-center justify-between bg-transparent">
@@ -241,10 +246,15 @@ const Navbar = () => {
 
       {!user ? (
         <div className="flex gap-2 items-center">
-          <Button className="flex gap-2 cursor-pointer bg-[#FECD6D] text-black hover:bg-[#fece6dd5] " onClick={handleCreateLink} disabled={isLoading}>
+          <Button
+            className="flex gap-2 cursor-pointer bg-[#FECD6D] text-black hover:bg-[#fece6dd5]"
+            onClick={handleCreateLink}
+            disabled={isLoading}
+          >
             <TrendingUp />
             Increase Leverage (5x)
           </Button>
+
           <ElectricBorder
             color="#10b981"
             speed={1}
@@ -254,7 +264,7 @@ const Navbar = () => {
             className="p-0.5"
           >
             <Button
-              className="cursor-pointer rounded-lg bg-amber-500 hover:bg-amber-600 text-black font-semibold"
+              className="cursor-pointer rounded-lg bg-[#FECD6D] text-black hover:bg-[#fece6dd5] font-semibold"
               onClick={() => setShowAuthFlow(true)}
             >
               Connect Wallet
@@ -262,28 +272,110 @@ const Navbar = () => {
           </ElectricBorder>
         </div>
       ) : (
-        <div className="flex gap-2 items-center">
-          <Button className="flex gap-2 cursor-pointer bg-[#FECD6D] text-black hover:bg-[#fece6dd5] " onClick={handleCreateLink} disabled={isLoading}>
+        <div className="flex gap-2 items-center relative">
+          {/* Leverage button stays the same */}
+          <Button
+            className="flex gap-2 cursor-pointer bg-[#FECD6D] text-black hover:bg-[#fece6dd5]"
+            onClick={handleCreateLink}
+            disabled={isLoading}
+          >
             <TrendingUp />
             Increase Leverage (5x)
           </Button>
-          <div className="border flex gap-2 items-center  p-2 bg-[#1E1F1E] text-white rounded-md">
-            <Image
-              src={solicon || "/placeholder.svg"}
-              alt={"sol"}
-              height={12}
-              width={12}
-              className="object-contain"
-            />
-            {primaryWallet?.address?.slice(0, 5)}...
-            {primaryWallet?.address?.slice(-5)} (devnet)
+
+          {/* Wallet pill + dropdown */}
+          <div className="relative">
+            {/* clickable wallet pill */}
+            <button
+              className="border flex gap-2 items-center p-2 bg-[#1E1F1E] text-white rounded-md text-sm cursor-pointer hover:bg-[#2a2a2a] transition"
+              onClick={() => setShowWalletMenu((prev) => !prev)}
+            >
+              <Image
+                src={solicon || "/placeholder.svg"}
+                alt={"sol"}
+                height={12}
+                width={12}
+                className="object-contain"
+              />
+              <span className="font-medium">
+                {primaryWallet?.address?.slice(0, 5)}...
+                {primaryWallet?.address?.slice(-5)} (devnet)
+              </span>
+
+              {/* small chevron to indicate dropdown */}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                className={`transition-transform ${
+                  showWalletMenu ? "rotate-180" : "rotate-0"
+                }`}
+              >
+                <path
+                  d="M6 9l6 6 6-6"
+                  stroke="#ffffff"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+
+            {/* dropdown menu (Logout) */}
+            {showWalletMenu && (
+              <div className="absolute left-0 top-full mt-2 w-54 rounded-lg border border-[#2a2a2a] bg-[#1E1F1E] shadow-lg p-3 z-50 space-y-3">
+                {/* Full address row */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-gray-300 text-xs font-mono max-w-[80%] truncate">
+                    {primaryWallet?.address}
+                  </div>
+                  <button
+                    className="text-[#FECD6D] hover:text-[#feda8b] cursor-pointer"
+                    onClick={copyAddress}
+                    title="Copy address"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect
+                        x="9"
+                        y="9"
+                        width="13"
+                        height="13"
+                        rx="2"
+                        ry="2"
+                      ></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Divider */}
+                <div className="border-t border-[#2a2a2a]" />
+
+                {/* Logout Button */}
+                <button
+                  className="w-full text-left text-[13px] font-semibold text-black bg-[#FECD6D] hover:bg-[#fece6dd5] rounded-md px-3 py-2 cursor-pointer"
+                  onClick={() => {
+                    setShowWalletMenu(false);
+                    handleLogOut();
+                  }}
+                >
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
-          <Button
-            className="cursor-pointer bg-[#FECD6D] hover:bg-[#fece6dd5] text-black font-semibold"
-            onClick={() => handleLogOut()}
-          >
-            Logout
-          </Button>
         </div>
       )}
     </div>
