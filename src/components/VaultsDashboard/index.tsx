@@ -1,43 +1,19 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { ActionPanel } from "../HomescreenDashboard/components/ActionPanel";
+
 import btcicon from "../../assets/cryptoIcons/bitcoin-btc-logo.png";
 import ethicon from "../../assets/cryptoIcons/ethereum-eth-logo.png";
 import solicon from "../../assets/cryptoIcons/solana-sol-logo.png";
 import usdcicon from "../../assets/cryptoIcons/usd-coin-usdc-logo.png";
 import usdticon from "../../assets/cryptoIcons/tether-usdt-logo.png";
 import suiicon from "../../assets/cryptoIcons/sui-sui-logo.png";
-import { useRouter } from "next/navigation";
-import { filter } from "@/interfaces/interface";
+import { Button } from "../ui/button";
 
 const markets = [
-  // {
-  //   name: "BTC",
-  //   symbol: "Bitcoin",
-  //   price: "$123,469.75",
-  //   apy: "+0.16%",
-  //   apr: "1.73%",
-  //   totalSupply: "$3.86M",
-  //   totalBorrow: "$468.98K",
-  //   tier: "Shared",
-  //   rewards: false,
-  //   icon: btcicon,
-  // },
-  // {
-  //   name: "ETH",
-  //   symbol: "Ethereum",
-  //   price: "$4,543.91",
-  //   apy: "+4.52%",
-  //   apr: "0.19%",
-  //   totalSupply: "$20.69M",
-  //   totalBorrow: "$1.89M",
-  //   tier: "Shared",
-  //   rewards: true,
-  //   icon: ethicon,
-  // },
   {
     organization: "Solend",
     name: "SOL",
@@ -77,135 +53,193 @@ const markets = [
     rewards: true,
     icon: usdticon,
   },
-  // {
-  //   name: "SUI",
-  //   symbol: "SUI",
-  //   price: "$0.9992",
-  //   apy: "+8.28%",
-  //   apr: "4.43%",
-  //   totalSupply: "$57.89K",
-  //   totalBorrow: "$35.92K",
-  //   tier: "Cross",
-  //   rewards: true,
-  //   icon: suiicon,
-  // },
 ];
 
 export default function VaultDashboard() {
   const [currentSelectedTab, setCurrentSelectedTab] = useState<
     "All" | "Shared" | "Isolated" | "Cross"
   >("All");
-  const filters: ("All" | "Shared" | "Isolated" | "Cross")[] = [
-    "All",
-    "Shared",
-    "Isolated",
-    "Cross",
-  ];
+
+  // action panel state (same shape we used in MarketDashboard)
+  const [actionPanel, setActionPanel] = useState<null | {
+    type:
+      | "supply"
+      | "withdraw"
+      | "repay"
+      | "spend"
+      | "addCollateral"
+      | "borrow";
+    asset: string;
+  }>(null);
 
   const filteredMarkets = useMemo(() => {
     if (currentSelectedTab === "All") return markets;
     return markets.filter((m) => m.tier === currentSelectedTab);
   }, [currentSelectedTab]);
+
   const router = useRouter();
 
   return (
-    <div className="min-h-screen bg-[#181818] w-[96%] ml-[2%] rounded-md text-foreground">
-      {/* Main Content */}
+    <div className="min-h-screen bg-[#181818] w-[96%] ml-[2%] rounded-md text-white">
       <main className="mx-auto max-w-7xl rounded-md">
-        <Card className="backdrop-blur-sm min-h-screen rounded-md bg-transparent shadow-lg p-0">
-          <CardContent className="p-0 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b border-border">
-                <tr>
-                  <th className="py-5 px-6 text-left text-muted-foreground font-semibold">
-                    Organisations
-                  </th>
-                  <th className="py-5 px-6 text-left text-muted-foreground font-semibold">
-                    Assets
-                  </th>
-                  <th className="py-5 px-6 text-right text-muted-foreground font-semibold">
-                    Deposit
-                  </th>
-                  <th className="py-5 px-6 text-right text-muted-foreground font-semibold">
-                    Borrow
-                  </th>
-                  <th className="py-5 px-6 text-right text-muted-foreground font-semibold">
-                    LTV
-                  </th>
-                  <th className="py-5 px-6 text-right text-muted-foreground font-semibold">
-                    Deposit APR
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMarkets.map((m, i) => (
-                  <tr
-                    key={`${m.name}-${i}`}
-                    className="border-b border-border hover:bg-secondary/10 transition-colors cursor-pointer"
-                    onClick={() => {
-                      router.push(`/lend-borrow/${m.name}`);
-                    }}
-                  >
-                    <td className="py-5 px-6 flex items-center gap-3">
-                      <div className="w-5 h-5 relative">
-                        <Image
-                          src={m.icon}
-                          alt={m.name}
-                          fill
-                          className="object-contain"
-                        />
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-foreground">
-                          {m.organization}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="text-right text-foreground font-medium">
-                      <div className="py-5 px-6 flex items-center gap-3">
-                        <div className="w-5 h-5 relative">
-                          <Image
-                            src={m.icon}
-                            alt={m.name}
-                            fill
-                            className="object-contain"
-                          />
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-foreground">
-                            {m.name}
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-5 px-6 text-right text-white font-semibold">
-                      {m.apy}
-                    </td>
-                    <td className="py-5 px-6 text-right text-foreground">
-                      {m.apr}
-                    </td>
-                    <td className="py-5 px-6 text-right text-foreground">
-                      {m.totalSupply}
-                    </td>
-                    <td className="py-5 px-6 text-right text-foreground">
-                      {m.totalBorrow}
-                    </td>
-                  </tr>
-                ))}
-                {filteredMarkets.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="py-8 px-6 text-center text-muted-foreground"
-                    >
-                      No markets found for {currentSelectedTab}.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+        {/* FLEX LAYOUT just like MarketDashboard */}
+        <div className="flex w-full gap-6">
+          {/* LEFT SIDE: table */}
+          <div
+            className={
+              actionPanel
+                ? "w-[65%] flex flex-col gap-4"
+                : "w-full flex flex-col gap-4"
+            }
+          >
+            <div className="rounded-2xl shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="border-b border-[#2a2a2a] text-left">
+                    <tr>
+                      <th className="py-5 px-6 text-[#9CA3AF] font-semibold text-xs uppercase tracking-wide">
+                        Organisations
+                      </th>
+                      <th className="py-5 px-6 text-[#9CA3AF] font-semibold text-xs uppercase tracking-wide">
+                        Assets
+                      </th>
+                      <th className="py-5 px-6 text-right text-[#9CA3AF] font-semibold text-xs uppercase tracking-wide">
+                        Deposit
+                      </th>
+                      <th className="py-5 px-6 text-right text-[#9CA3AF] font-semibold text-xs uppercase tracking-wide">
+                        Borrow
+                      </th>
+                      <th className="py-5 px-6 text-right text-[#9CA3AF] font-semibold text-xs uppercase tracking-wide">
+                        LTV
+                      </th>
+                      <th className="py-5 px-6 text-right text-[#9CA3AF] font-semibold text-xs uppercase tracking-wide">
+                        Deposit APR
+                      </th>
+                      <th className="py-5 px-6 text-right text-[#9CA3AF] font-semibold text-xs uppercase tracking-wide"></th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {filteredMarkets.map((m, i) => (
+                      <tr
+                        key={`${m.name}-${i}`}
+                        className="border-b border-[#2a2a2a] hover:bg-[#222222]/40 transition-colors cursor-pointer"
+                        onClick={() => {
+                          // OLD:
+                          // router.push(`/lend-borrow/${m.name}`);
+
+                          // NEW:
+                          // open the side panel for that vault
+                          setActionPanel({
+                            type: "supply", // or "borrow" or "spend" depending on what you want this row to mean
+                            asset: String(m.name),
+                          });
+                        }}
+                      >
+                        {/* Organisation cell */}
+                        <td className="py-5 px-6">
+                          <div className="flex items-center gap-3">
+                            <div className="w-6 h-6 relative flex-shrink-0">
+                              <Image
+                                src={m.icon}
+                                alt={m.name}
+                                fill
+                                className="object-contain"
+                              />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-white text-sm leading-tight">
+                                {m.organization}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Asset cell */}
+                        <td className="py-5 px-6">
+                          <div className="flex items-center gap-3">
+                            <div className="w-6 h-6 relative flex-shrink-0">
+                              <Image
+                                src={m.icon}
+                                alt={m.name}
+                                fill
+                                className="object-contain"
+                              />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-white text-sm leading-tight">
+                                {m.name}
+                              </span>
+                              <span className="text-[11px] text-gray-400 leading-tight">
+                                {m.symbol}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Deposit (your "apy") */}
+                        <td className="py-5 px-6 text-right text-[#FECD6D] font-semibold text-sm">
+                          {m.apy}
+                        </td>
+
+                        {/* Borrow (your "apr") */}
+                        <td className="py-5 px-6 text-right text-white text-sm">
+                          {m.apr}
+                        </td>
+
+                        {/* LTV (you used totalSupply here in original mock) */}
+                        <td className="py-5 px-6 text-right text-white text-sm">
+                          {m.totalSupply}
+                        </td>
+
+                        {/* Deposit APR (you used totalBorrow in original mock) */}
+                        <td className="py-5 px-6 text-right text-white text-sm">
+                          {m.totalBorrow}
+                        </td>
+                        <td className="py-5 px-6 text-right text-white text-sm">
+                          <Button
+                            className="bg-[#FECD6D] hover:bg-[#fece6dd5] text-black cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
+                            onClick={() =>
+                              setActionPanel({
+                                type: "supply",
+                                asset: String(m.name),
+                              })
+                            }
+                          >
+                            Supply
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {filteredMarkets.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          className="py-8 px-6 text-center text-gray-500 text-sm"
+                        >
+                          No markets found for {currentSelectedTab}.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT SIDE: action panel dock (only shown when actionPanel != null) */}
+          {actionPanel && (
+            <div className="w-[35%] space-y-6">
+              {actionPanel && (
+                <ActionPanel
+                  actionPanel={actionPanel}
+                  onClose={() => setActionPanel(null)}
+                />
+              )}
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );

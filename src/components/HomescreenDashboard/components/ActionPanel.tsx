@@ -17,6 +17,7 @@ export function ActionPanel({
     repay: "Repay debt",
     spend: "Spend",
     addCollateral: "Add collateral",
+    borrow:"Borrow"
   };
 
   const heading = prettyTitleMap[actionPanel.type] || "Action";
