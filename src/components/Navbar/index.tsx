@@ -9,6 +9,8 @@ import vault from "../../assets/icons/strategicvault.png";
 import more from "../../assets/icons/more.png";
 import Image from "next/image";
 import solicon from "../../assets/cryptoIcons/solana-sol-logo.png";
+import { TrendingUp } from "lucide-react";
+import { useState } from "react";
 
 const prettyLabel = (slug: string) => {
   if (!slug) return "";
@@ -175,6 +177,30 @@ const useNavbarTitle = () => {
 const Navbar = () => {
   const { setShowAuthFlow, handleLogOut, user, primaryWallet } =
     useDynamicContext();
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const handleCreateLink = async () => {
+    setIsLoading(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/template", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      const data = await response.json();
+
+      window.open(data.url, "_blank");
+    } catch (error) {
+      console.error("Error:", error);
+      setMessage("An error occurred while creating the link");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const title = useNavbarTitle();
 
@@ -214,23 +240,33 @@ const Navbar = () => {
       </div>
 
       {!user ? (
-        <ElectricBorder
-          color="#10b981"
-          speed={1}
-          chaos={0.5}
-          thickness={2}
-          style={{ borderRadius: 24 }}
-          className="p-0.5"
-        >
-          <Button
-            className="cursor-pointer rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-900 font-semibold"
-            onClick={() => setShowAuthFlow(true)}
-          >
-            Connect Wallet
+        <div className="flex gap-2 items-center">
+          <Button className="flex gap-2 cursor-pointer bg-[#FECD6D] text-black hover:bg-[#fece6dd5] " onClick={handleCreateLink} disabled={isLoading}>
+            <TrendingUp />
+            Increase Leverage (5x)
           </Button>
-        </ElectricBorder>
+          <ElectricBorder
+            color="#10b981"
+            speed={1}
+            chaos={0.5}
+            thickness={2}
+            style={{ borderRadius: 24 }}
+            className="p-0.5"
+          >
+            <Button
+              className="cursor-pointer rounded-lg bg-amber-500 hover:bg-amber-600 text-black font-semibold"
+              onClick={() => setShowAuthFlow(true)}
+            >
+              Connect Wallet
+            </Button>
+          </ElectricBorder>
+        </div>
       ) : (
         <div className="flex gap-2 items-center">
+          <Button className="flex gap-2 cursor-pointer bg-[#FECD6D] text-black hover:bg-[#fece6dd5] " onClick={handleCreateLink} disabled={isLoading}>
+            <TrendingUp />
+            Increase Leverage (5x)
+          </Button>
           <div className="border flex gap-2 items-center  p-2 bg-[#1E1F1E] text-white rounded-md">
             <Image
               src={solicon || "/placeholder.svg"}
@@ -243,7 +279,7 @@ const Navbar = () => {
             {primaryWallet?.address?.slice(-5)} (devnet)
           </div>
           <Button
-            className="cursor-pointer bg-[#FECD6D] hover:bg-[#fece6dd5] text-slate-900 font-semibold"
+            className="cursor-pointer bg-[#FECD6D] hover:bg-[#fece6dd5] text-black font-semibold"
             onClick={() => handleLogOut()}
           >
             Logout
