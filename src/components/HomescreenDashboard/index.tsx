@@ -555,7 +555,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
 
                       <div className="mt-6 flex w-full items-start justify-between">
                         <div className="flex md:justify-end">
-                          <button className="rounded-md bg-amber-500 cursor-pointer text-slate-950 px-5 py-2.5 text-sm font-semibold shadow hover:bg-amber-400 transition">
+                          <button className="rounded-md bg-[#FECD6D] hover:bg-[#fece6dd5] text-black cursor-pointer  px-5 py-2.5 text-sm font-semibold shadow  transition">
                             Deposit now
                           </button>
                         </div>
@@ -585,7 +585,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
 
                       <div className="mt-6 flex w-full items-start justify-between">
                         <div className="flex md:justify-end">
-                          <button className="rounded-md bg-amber-500 text-slate-950 cursor-pointer px-5 py-2.5 text-sm font-semibold shadow hover:bg-amber-400 transition">
+                          <button className="rounded-md bg-[#FECD6D] hover:bg-[#fece6dd5] text-black cursor-pointer px-5 py-2.5 text-sm font-semibold shadow  transition">
                             Deposit now
                           </button>
                         </div>
