@@ -12,6 +12,7 @@ import solicon from "../../assets/cryptoIcons/solana-sol-logo.png";
 import { TrendingUp } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/useToast";
+import TestTokensModal from "../Modals/token-modal";
 
 const prettyLabel = (slug: string) => {
   if (!slug) return "";
@@ -180,7 +181,8 @@ const Navbar = () => {
     useDynamicContext();
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
-    const {toast}=useToast()
+  const [openModal, setopenModal] = useState(false);
+  const { toast } = useToast();
   const handleCreateLink = async () => {
     setIsLoading(true);
     setMessage("");
@@ -210,9 +212,9 @@ const Navbar = () => {
     if (!primaryWallet?.address) return;
     await navigator.clipboard.writeText(primaryWallet.address);
     toast({
-        title: "Address Copied!!!",
-        description: "Your Wallet Address has been copied successfully",
-      });
+      title: "Address Copied!!!",
+      description: "Your Wallet Address has been copied successfully",
+    });
   };
 
   return (
@@ -249,9 +251,18 @@ const Navbar = () => {
         </div>
         {title.name}
       </div>
+      <TestTokensModal openModal={openModal} setOpenModal={setopenModal}/>
 
       {!user ? (
         <div className="flex gap-2 items-center">
+          <Button
+            className="bg-transparent text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
+            onClick={() => {
+              setopenModal(true);
+            }}
+          >
+            Get Test Tokens
+          </Button>
           <Button
             className="flex gap-2 cursor-pointer bg-[#FECD6D] text-black hover:bg-[#fece6dd5]"
             onClick={handleCreateLink}
@@ -280,6 +291,14 @@ const Navbar = () => {
       ) : (
         <div className="flex gap-2 items-center relative">
           {/* Leverage button stays the same */}
+          <Button
+            className="bg-transparent text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
+            onClick={() => {
+              setopenModal(true);
+            }}
+          >
+            Get Test Tokens
+          </Button>
           <Button
             className="flex gap-2 cursor-pointer bg-[#FECD6D] text-black hover:bg-[#fece6dd5]"
             onClick={handleCreateLink}
