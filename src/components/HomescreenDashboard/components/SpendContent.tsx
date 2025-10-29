@@ -1,5 +1,7 @@
+import { getTokenIcon } from "@/utils/helper";
 import { ChevronDownIcon } from "lucide-react";
 import * as React from "react";
+import Image from "next/image";
 
 export function SpendContent({
   activeTab,
@@ -15,7 +17,7 @@ export function SpendContent({
 
   // Demo options (you'd replace with real data later)
   const dappOptions = ["Raydium", "Orca", "Meteora", "Lifinity"];
-  const marketOptions = ["USDC", "USDT", "SOL", "MON"];
+  const marketOptions = ["USDC", "USDT", "SOL"];
 
   // Close menus when clicking outside
   const dappRef = React.useRef<HTMLDivElement | null>(null);
@@ -23,16 +25,10 @@ export function SpendContent({
 
   React.useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (
-        dappRef.current &&
-        !dappRef.current.contains(e.target as Node)
-      ) {
+      if (dappRef.current && !dappRef.current.contains(e.target as Node)) {
         setShowDappMenu(false);
       }
-      if (
-        marketRef.current &&
-        !marketRef.current.contains(e.target as Node)
-      ) {
+      if (marketRef.current && !marketRef.current.contains(e.target as Node)) {
         setShowMarketMenu(false);
       }
     }
@@ -163,27 +159,32 @@ export function SpendContent({
             ref={marketRef}
           >
             <div className="flex items-start justify-between">
-              <div className="flex items-start gap-3">
+              <div className="flex items-center gap-3">
                 {/* token icon */}
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2d4a8d] text-white text-[12px] font-semibold">
-                  $
-                </div>
+                {getTokenIcon(selectedMarket as string) && (
+                  <Image
+                    src={getTokenIcon(selectedMarket as string) as any}
+                    alt="logo"
+                    height={34}
+                    width={34}
+                  />
+                )}
                 <div>
                   <div className="text-[14px] text-gray-400 font-medium">
                     Select market
                   </div>
-                    <div className="text-[16px] text-gray-300 font-semibold leading-tight flex items-center gap-2">
-                      {selectedMarket}
-                    </div>
+                  <div className="text-[16px] text-gray-300 font-semibold leading-tight flex items-center gap-2">
+                    {selectedMarket}
+                  </div>
                 </div>
               </div>
 
               <button
                 className="border border-[#2a2a2a] bg-transparent rounded-md h-8 w-8 flex items-center justify-center cursor-pointer hover:bg-[#2a2a2a] transition"
                 onClick={() => {
-                    // toggle this dropdown, close the other
-                    setShowMarketMenu((open) => !open);
-                    setShowDappMenu(false);
+                  // toggle this dropdown, close the other
+                  setShowMarketMenu((open) => !open);
+                  setShowDappMenu(false);
                 }}
               >
                 <ChevronDownIcon
@@ -212,9 +213,14 @@ export function SpendContent({
                   >
                     <span className="flex items-center gap-2">
                       {/* token circle */}
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#2d4a8d] text-white text-[10px] font-semibold">
-                        $
-                      </span>
+                      {getTokenIcon(opt as string) && (
+                        <Image
+                          src={getTokenIcon(opt as string) as any}
+                          alt="logo"
+                          height={18}
+                          width={18}
+                        />
+                      )}
                       <span>{opt}</span>
                     </span>
 
