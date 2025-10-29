@@ -308,7 +308,7 @@ export default function Sidebar() {
           />
         </svg>
       ),
-      label: "Strategic Vaults",
+      label: "Farm (50x)",
       href: "/strategic-vaults",
     },
     {
@@ -442,6 +442,9 @@ export default function Sidebar() {
                 onMouseEnter={() => setHoverIndex(i)}
                 onMouseLeave={() => setHoverIndex(null)}
                 onClick={(e) => {
+                  if(item.href==='/more'){
+                    return;
+                  }
                   e.stopPropagation();
                   if (item.href) router.replace(item.href);
                 }}

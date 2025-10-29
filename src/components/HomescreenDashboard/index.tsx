@@ -1,19 +1,26 @@
 "use client";
 
 import type React from "react";
-import {
-  ChevronUp,
-  ChevronDown,
-} from "lucide-react";
+import { ChevronUp, ChevronDown } from "lucide-react";
 import Image from "next/image";
 import depositPoolIcon from "../../assets/icons/depositIllust.png";
 import lendingIcon from "../../assets/icons/lendingIlust.png";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import DevnetWalletPanel from "../DevnetPanelWallet";
 import { Button } from "../ui/button";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { KpiCard } from "./components/KpiCard";
 import { ActionPanel } from "./components/ActionPanel";
+import { PublicKey } from "@solana/web3.js";
+import { markets } from "../MarketDashboard";
+import { getConnection } from "@/utils/chain/solana";
+import {
+  fetchMarketViewRawWeb3,
+  fetchUserPositionViewRawWeb3,
+} from "@/utils/chain/helper";
+import { getTokenIcon } from "@/utils/helper";
+import { usePythPrice } from "@/hooks/usePrice";
+import { BTC_FEED_ID, SOL_FEED_ID, USDC_FEED_ID, USDT_FEED_ID } from "@/constants/pricefeedids";
 
 export default function HomeScreenDashboard({ data }: { data: any }) {
   // Mock data fallback
@@ -48,16 +55,133 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
   };
 
   const merged = { ...d, ...(data || {}) };
-  const { user } = useDynamicContext();
+  const { user, primaryWallet } = useDynamicContext();
+  const sol = usePythPrice(SOL_FEED_ID);
+  const usdc = usePythPrice(USDC_FEED_ID);
+  const usdt=usePythPrice(USDT_FEED_ID)
 
   const [showSupplyPositions, setshowSupplyPositions] = useState(true);
   const [showDebtPositions, setshowDebtPositions] = useState(true);
+    const livePricesBySymbol: Record<string, number> = {
+    SOL: sol?.price ?? 0,
+    USDT: usdt?.price ?? 0,
+    USDC: usdc?.price ?? 0,
+  };
 
   // this controls the right-side "action drawer"
   const [actionPanel, setActionPanel] = useState<null | {
     type: "supply" | "withdraw" | "repay" | "spend" | "addCollateral";
     asset: string;
+    mintAddress: string;
   }>(null);
+  const [marketRows, setMarketRows] = useState<any[]>([]);
+  const [hasAnySupply, setHasAnySupply] = useState(false);
+  const [netWorth, setNetWorth] = useState(0);
+  const [hasAnyBorrow, setHasAnyBorrow] = useState(false);
+
+  async function buildEnrichedMarketsForUser(walletAddress: string) {
+    // turn wallet -> PublicKey
+    let ownerPk: PublicKey;
+    try {
+      ownerPk = new PublicKey(walletAddress);
+    } catch {
+      // bad/invalid pubkey? just return zeroed markets
+      return markets.map((m) => ({
+        ...m,
+        userSupplyUsd: 0,
+        supplyAprPct: 0,
+        totalSupplyUi: 0,
+        totalBorrowUi: 0,
+        userBorrowUsd: 0,
+      }));
+    }
+
+    const connection = getConnection();
+
+    const enriched = [];
+
+    for (const m of markets) {
+      const mintPk = new PublicKey(m.mintAddress);
+
+      // 1. read user position in this market
+      const userPos = await fetchUserPositionViewRawWeb3({
+        owner: ownerPk,
+        marketMint: mintPk,
+        connection,
+        commitment: "confirmed",
+      });
+
+      // how much user deposited here (shares)
+      const userShares = userPos.depositedSharesUi ?? 0;
+
+      // NOTE: userShares is not USD yet. For now we will just show this number
+      // as "Amount" and "$Amount". You can multiply by price later.
+
+      // 2. read market stats
+      const mv = await fetchMarketViewRawWeb3({
+        marketMint: mintPk,
+        connection,
+        commitment: "confirmed",
+      });
+
+      const totalDeposits = Number(mv.totalDepositsUi);
+      const totalBorrows = Number(mv.totalBorrowsUi);
+      const reserveFactor = Number(mv.reserveFactorRaw) / 10000; // assume bps
+
+      const utilization = totalDeposits > 0 ? totalBorrows / totalDeposits : 0; // 0..1
+
+      // aprs
+      const baseRate = 0.02;
+      const slope1 = 0.2; // linear up to 100%
+      const borrowApr = baseRate + slope1 * utilization;
+      const supplyApr = borrowApr * utilization * (1 - reserveFactor);
+
+      enriched.push({
+        ...m,
+        userSupplyUsd: userShares, // number
+        supplyAprPct: supplyApr * 100, // % for UI
+        totalSupplyUi: totalDeposits, // number
+        totalBorrowUi: totalBorrows, // number
+        utilizationPct: utilization * 100, // optional, handy for later
+      });
+    }
+
+    return enriched;
+  }
+
+  useEffect(() => {
+    (async () => {
+      if (
+        !primaryWallet ||
+        !("address" in primaryWallet) ||
+        !primaryWallet.address
+      ) {
+        setMarketRows([]);
+        return;
+      }
+
+      const rows = await buildEnrichedMarketsForUser(primaryWallet.address);
+      setMarketRows(rows);
+      const anySupply = rows.some((r) => (r.userSupplyUsd ?? 0) > 0);
+      setHasAnySupply(anySupply);
+      const suppliedTotal = rows.reduce((acc, r) => {
+              const livePx = livePricesBySymbol[r.name];
+          if (livePx === undefined || livePx === null) return acc;
+          return acc + (r.userSupplyUsd)
+        },0
+      );
+      setNetWorth(suppliedTotal / 10 ** 9);
+    })();
+  }, [primaryWallet]);
+
+    const totalSupply = useMemo(() => {
+      return marketRows.reduce((acc, row) => {
+        const livePx = livePricesBySymbol[row.name];
+        if (livePx === undefined || livePx === null) return acc;
+        return acc + (row.userSupplyUsd/ 10 ** 9 * livePx);
+      }, 0);
+    }, [marketRows, livePricesBySymbol]);
+
 
   return (
     <div className="w-[96%] ml-[2%] min-h-screen bg-[#181818] text-white rounded-md">
@@ -81,7 +205,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                 </svg>
               }
               title="Net Worth"
-              value={`$${merged.netWorth.toFixed(2)}`}
+              value={`$${totalSupply.toFixed(4)}`}
               highlight={undefined}
             />
             <KpiCard
@@ -100,7 +224,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                 </svg>
               }
               title="Yielding positions"
-              value={`$${merged.yieldingPositions.toFixed(2)}`}
+              value={`$${totalSupply.toFixed(4)}`}
               highlight={undefined}
             />
             <KpiCard
@@ -153,7 +277,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                       </svg>
                     }
                     title="Net Worth"
-                    value={`$${merged.netWorth.toFixed(2)}`}
+                    value={`$${totalSupply.toFixed(4)}`}
                     highlight={undefined}
                   />
                   <KpiCard
@@ -172,7 +296,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                       </svg>
                     }
                     title="Yielding positions"
-                    value={`$${merged.yieldingPositions.toFixed(2)}`}
+                    value={`$${totalSupply.toFixed(4)}`}
                     highlight={undefined}
                   />
                   <KpiCard
@@ -198,18 +322,18 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
               {/* When an action is open, show wallet panel up top on the left */}
 
               {/* Authenticated: positions tables */}
-              {user && (
+              {hasAnySupply && (
                 <>
                   {/* Supply Positions */}
                   <div className="rounded-2xl border border-[#232322] bg-transparent shadow-sm">
                     {/* Card header */}
-                    <div className="flex items-center justify-between p-5 border-b border-emerald-900/30">
+                    <div className="flex items-center justify-between p-5 border-b border-[#232322]">
                       <h2 className="text-lg font-semibold text-white">
                         Supply Positions
                       </h2>
                       <div className="flex gap-4 items-center">
                         <div className="text-sm font-medium text-white">
-                          ${merged.lendBorrow.total.toFixed(2)}
+                          ${totalSupply.toFixed(4)}
                         </div>
                         <button
                           className="rounded-lg p-1 hover:bg-gray-100 transition cursor-pointer"
@@ -233,7 +357,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                         {/* Header row */}
                         <div className="grid grid-cols-7 text-xs font-medium text-gray-400 px-3 pb-2">
                           <div className="">Assets</div>
-                          <div className="text-right">Amount</div>
+                          <div className="text-right">Tokens</div>
                           <div className="text-right">Value</div>
                           <div className="text-right">Locked</div>
                           <div className="text-right">APR</div>
@@ -242,118 +366,85 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                         </div>
 
                         {/* Body rows */}
-                        <div className="divide-y divide-emerald-900/30">
-                          {merged.lendBorrow.rows.map(
-                            (
-                              r: {
-                                market: React.ReactNode;
-                                assets: number;
-                                debt: number;
-                                locked?: number;
-                                apr?: number;
-                              },
-                              index: number
-                            ) => (
-                              <div
-                                key={index}
-                                className="grid grid-cols-7 items-center px-3 py-3 text-sm hover:bg-emerald-900/20 transition"
-                              >
-                                {/* Asset / token */}
-                                <div className="flex items-center gap-3">
-                                  <span className="inline-flex h-3 w-3 rounded-full bg-emerald-500 ring-1 ring-emerald-400" />
-                                  <span className="font-medium text-white">
-                                    {r.market}
-                                  </span>
-                                </div>
-
-                                {/* Amount */}
-                                <div className="text-right text-gray-300">
-                                  ${r.assets.toFixed(2)}
-                                </div>
-
-                                {/* Value */}
-                                <div className="text-right text-gray-300">
-                                  ${r.debt.toFixed(2)}
-                                </div>
-
-                                {/* Locked */}
-                                <div className="text-right text-gray-300">
-                                  ${r.locked?.toFixed(2) ?? "0.00"}
-                                </div>
-
-                                {/* APR */}
-                                <div className="text-right text-gray-300">
-                                  {r.apr ? `${r.apr.toFixed(2)}%` : "0.00%"}
-                                </div>
-
-                                {/* Withdraw button */}
-                                <div className="flex justify-end">
-                                  <Button
-                                    className="bg-transparent text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
-                                    onClick={() =>
-                                      setActionPanel({
-                                        type: "withdraw",
-                                        asset: String(r.market),
-                                      })
+                        <div className="divide-y divide-[#232322]">
+                          {marketRows.map((r, index: number) => (
+                            <div
+                              key={index}
+                              className="grid grid-cols-7 items-center px-3 py-3 text-sm hover:bg-[#1F1F1F] transition"
+                            >
+                              {/* Asset / token */}
+                              <div className="flex items-center gap-3">
+                                {getTokenIcon(r.symbol as string) && (
+                                  <Image
+                                    src={
+                                      getTokenIcon(r.symbol as string) as any
                                     }
-                                  >
-                                    Withdraw
-                                  </Button>
-                                </div>
-
-                                {/* Supply button */}
-                                <div className="flex justify-end">
-                                  <Button
-                                    className="bg-[#0D0D0D] text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
-                                    onClick={() =>
-                                      setActionPanel({
-                                        type: "supply",
-                                        asset: String(r.market),
-                                      })
-                                    }
-                                  >
-                                    Supply
-                                  </Button>
-                                </div>
+                                    alt="logo"
+                                    height={18}
+                                    width={18}
+                                  />
+                                )}
+                                <span className="font-medium text-white">
+                                  {r.name}
+                                </span>
                               </div>
-                            )
-                          )}
 
-                          {/* TOTAL row */}
-                          <div className="grid grid-cols-7 items-center px-3 py-3 text-sm font-semibold">
-                            {/* "TOTAL" under Assets col */}
-                            <div className="text-gray-400">TOTAL</div>
+                              {/* Amount */}
+                              <div className="text-right text-gray-300">
+                                {r.userSupplyUsd / 10 ** 9}
+                              </div>
 
-                            {/* Total Amount */}
-                            <div className="text-right text-white">
-                              $
-                              {merged.lendBorrow.rows
-                                .reduce(
-                                  (a: number, b: { assets: number }) =>
-                                    a + b.assets,
-                                  0
-                                )
-                                .toFixed(2)}
+                              {/* Value */}
+                              <div className="text-right text-gray-300">
+                                $
+                                {((r.userSupplyUsd / 10 ** 9) * livePricesBySymbol[r.name]).toFixed(4)}
+                              </div>
+
+                              {/* Locked */}
+                              <div className="text-right text-gray-300">
+                                ${((r.userSupplyUsd / 10 ** 9) * livePricesBySymbol[r.name]).toFixed(4)}
+                              </div>
+
+                              {/* APR */}
+                              <div className="text-right text-gray-300">
+                                {r.supplyAprPct
+                                  ? `${r.supplyAprPct.toFixed(2)}%`
+                                  : "0.00%"}
+                              </div>
+
+                              {/* Withdraw button */}
+                              <div className="flex justify-end">
+                                <Button
+                                  className="bg-transparent text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
+                                  onClick={() =>
+                                    setActionPanel({
+                                      type: "withdraw",
+                                      asset: String(r.name),
+                                      mintAddress: r.mintAddress,
+                                    })
+                                  }
+                                >
+                                  Withdraw
+                                </Button>
+                              </div>
+
+                              {/* Supply button */}
+                              <div className="flex justify-end">
+                                <Button
+                                  className="bg-[#0D0D0D] text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
+                                  onClick={() =>
+                                    setActionPanel({
+                                      type: "supply",
+                                      asset: String(r.name),
+                                      mintAddress: r.mintAddress,
+                                    })
+                                  }
+                                >
+                                  Supply
+                                </Button>
+                              </div>
                             </div>
-
-                            {/* Total Value */}
-                            <div className="text-right text-white">
-                              $
-                              {merged.lendBorrow.rows
-                                .reduce(
-                                  (a: number, b: { debt: number }) =>
-                                    a + b.debt,
-                                  0
-                                )
-                                .toFixed(2)}
-                            </div>
-
-                            {/* Empty cells to align with 7-col grid */}
-                            <div />
-                            <div />
-                            <div />
-                            <div />
-                          </div>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -362,7 +453,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                   {/* Debt Positions */}
                   <div className="rounded-2xl border border-[#232322] bg-transparent shadow-sm">
                     {/* Card header */}
-                    <div className="flex items-center justify-between p-5 border-b border-emerald-900/30">
+                    <div className="flex items-center justify-between p-5 border-b border-[#232322]">
                       <h2 className="text-lg font-semibold text-white">
                         Debt Positions
                       </h2>
@@ -401,7 +492,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                           <div className="text-right"></div> {/* Add Col. */}
                         </div>
 
-                        <div className="divide-y divide-emerald-900/30">
+                        <div className="divide-y divide-[#232322]">
                           {merged.lendBorrow.rows.map(
                             (
                               r: {
@@ -416,7 +507,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                             ) => (
                               <div
                                 key={index}
-                                className="grid grid-cols-8 items-center px-3 py-3 text-sm hover:bg-emerald-900/20 transition"
+                                className="grid grid-cols-8 items-center px-3 py-3 text-sm hover:bg-[#1F1F1F] transition"
                               >
                                 {/* Assets */}
                                 <div className="flex items-center gap-3">
@@ -439,6 +530,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                                       setActionPanel({
                                         type: "repay",
                                         asset: String(r.market),
+                                        mintAddress: "",
                                       })
                                     }
                                   >
@@ -454,6 +546,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                                       setActionPanel({
                                         type: "spend",
                                         asset: String(r.market),
+                                        mintAddress: "",
                                       })
                                     }
                                   >
@@ -489,6 +582,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                                       setActionPanel({
                                         type: "addCollateral",
                                         asset: String(r.market),
+                                        mintAddress: "",
                                       })
                                     }
                                   >
@@ -498,38 +592,6 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                               </div>
                             )
                           )}
-
-                          {/* TOTAL row */}
-                          <div className="grid grid-cols-8 items-center px-3 py-3 text-sm font-semibold">
-                            {/* TOTAL label under Assets col */}
-                            <div className="text-gray-400">TOTAL</div>
-
-                            {/* total Value */}
-                            <div className="text-right text-white">
-                              $
-                              {merged.lendBorrow.rows
-                                .reduce(
-                                  (a: number, b: { assets: number }) =>
-                                    a + b.assets,
-                                  0
-                                )
-                                .toFixed(2)}
-                            </div>
-
-                            {/* Empty cells for alignment */}
-                            <div />
-                            <div />
-
-                            {/* APR aggregate is usually not meaningful */}
-                            <div />
-
-                            {/* collateral/health total usually doesn't aggregate cleanly */}
-                            <div />
-                            <div />
-
-                            {/* Blank under Add Col. */}
-                            <div />
-                          </div>
                         </div>
                       </div>
                     )}
@@ -538,7 +600,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
               )}
 
               {/* Unauthenticated: marketing cards */}
-              {!user && (
+              {!hasAnySupply && (
                 <>
                   <div className="rounded-2xl flex items-center p-2 justify-between border border-[#232322] bg-transparent shadow-sm">
                     <div className="p-5">
@@ -603,7 +665,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
               )}
               {actionPanel && (
                 <div className="space-y-6">
-                  <DevnetWalletPanel />
+                  <DevnetWalletPanel solValue={sol} usdcValue={usdc} usdtValue={usdt} />
                 </div>
               )}
             </div>
@@ -612,7 +674,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
           {/* RIGHT SIDE */}
           <div className="w-[35%] space-y-6 transition-all">
             {/* Default: wallet on right */}
-            {!actionPanel && <DevnetWalletPanel />}
+            {!actionPanel && <DevnetWalletPanel solValue={sol} usdcValue={usdc} usdtValue={usdt} />}
 
             {/* Action mode: show the action drawer */}
             {actionPanel && (
@@ -627,4 +689,3 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
     </div>
   );
 }
-

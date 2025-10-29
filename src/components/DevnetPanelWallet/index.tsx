@@ -1,6 +1,6 @@
 "use client";
-import React from "react";
-import { useEffect, useMemo, useState } from "react";
+
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Connection,
   PublicKey,
@@ -8,7 +8,6 @@ import {
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import {
-  getAssociatedTokenAddressSync,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
@@ -16,45 +15,40 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import Image from "next/image";
 import { getTokenIcon } from "@/utils/helper";
-/**
- * DevnetWalletPanel
- * ------------------------------------------------------------
- * A self‑contained right‑hand column that fetches balances for:
- *   - Native SOL
- *   - A short list of SPL tokens (e.g. USDC Devnet)
- *
- * It uses Dynamic Labs to read the connected wallet address.
- * The UI mirrors the "Wallet" + "Yield opportunities" pane in your screenshot.
- *
- * How to use (Next.js / App Router):
- *   1) Ensure deps are installed:
- *        npm i @solana/web3.js @solana/spl-token lucide-react @dynamic-labs/sdk-react-core
- *   2) Drop this file into your project and render <DevnetWalletPanel />
- *   3) Optionally pass `rpcUrl` and `tokenConfigs` to customize.
- */
+import { PythPrice } from "@/hooks/usePrice";
 
+/**
+ * TokenConfig
+ * ------------------------------------------------------------
+ * Describes each asset we want to show in the wallet:
+ *  - SOL (native)
+ *  - USDC devnet mint
+ *  - USDT devnet mint
+ */
 export type TokenConfig = {
   symbol: string;
   // Use `native: true` for SOL. For SPL tokens provide mint.
   native?: boolean;
   mint?: string;
-  // For the UI value column (devnet has no market prices). You can pipe in mocked prices
-  // from props, or leave undefined to show "—".
+  // Fallback/static USD (only used if no live oracle price is available)
   usdPrice?: number;
-  // Some devnet tokens use Token-2022; default uses classic token program.
+  // Mark if it's Token-2022 program, just in case
   programId?: "token-2022" | "token";
 };
 
+// Default assets we want to show in the wallet panel
 const DEFAULT_TOKENS: TokenConfig[] = [
-  { symbol: "SOL", native: true, usdPrice: 0.0 },
-  // Canonical USDC Devnet mint
+  {
+    symbol: "SOL",
+    native: true,
+    usdPrice: 0.0,
+  },
   {
     symbol: "USDC",
     mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
     usdPrice: 1.0,
     programId: "token",
   },
-  // Example extra (comment in if you want USDT Devnet)
   {
     symbol: "USDT",
     mint: "Ejmc1UB4EsES5UfZyaG7kRGtCLGnogT7xWRqvEih5Z7",
@@ -63,116 +57,193 @@ const DEFAULT_TOKENS: TokenConfig[] = [
   },
 ];
 
+/**
+ * DevnetWalletPanel
+ * ------------------------------------------------------------
+ * Props:
+ *  - solValue, usdtValue, usdcValue:
+ *      live oracle quotes from Pyth, e.g. { price: 195.77, ... }
+ *      IMPORTANT: we assume .price is already scaled to human USD.
+ *
+ *  - rpcUrl:
+ *      which Solana cluster to query (defaults to devnet)
+ *
+ *  - tokenConfigs:
+ *      which tokens/mints to display
+ *
+ *  - title:
+ *      card header label
+ */
 export default function DevnetWalletPanel({
+  solValue,
+  usdtValue,
+  usdcValue,
   rpcUrl = clusterApiUrl("devnet"),
   tokenConfigs = DEFAULT_TOKENS,
   title = "Wallet",
 }: {
+  solValue: PythPrice;
+  usdtValue: PythPrice;
+  usdcValue: PythPrice;
   rpcUrl?: string;
   tokenConfigs?: TokenConfig[];
   title?: string;
 }) {
-  const { user, primaryWallet } = useDynamicContext();
+  const { primaryWallet } = useDynamicContext();
   const address = primaryWallet?.address;
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // rows = balances for each token
   const [rows, setRows] = useState<
-    { symbol: string; amount: number; usdPrice?: number }[]
+    { symbol: string; amount: number }[]
   >([]);
+
   const [showYeilds, setshowYeilds] = useState<boolean>(true);
 
+  // Memoize Solana RPC connection so we don't rebuild it every render
   const connection = useMemo(
     () => new Connection(rpcUrl, "confirmed"),
     [rpcUrl]
   );
 
+  /**
+   * livePricesBySymbol
+   * ------------------------------------------------------------
+   * Map token symbol -> live USD price from oracle.
+   *
+   * We assume:
+   *  - solValue.price   is SOL/USD
+   *  - usdtValue.price  is USDT/USD
+   *  - usdcValue.price  is USDC/USD
+   *
+   * If in your hook it's called `priceNum` instead of `price`,
+   * just swap those here.
+   */
+  const livePricesBySymbol: Record<string, number | undefined> = {
+    SOL: solValue?.price ?? undefined,
+    USDT: usdtValue?.price ?? undefined,
+    USDC: usdcValue?.price ?? undefined,
+  };
+
+  /**
+   * Fetch balances whenever wallet, connection, or token list changes.
+   */
   useEffect(() => {
     let cancelled = false;
+
     async function run() {
       if (!address) return;
       setLoading(true);
       setError(null);
+
       try {
         const owner = new PublicKey(address);
 
-        // 1) Native SOL
+        // We'll build up newRows like [{symbol:"SOL", amount: x}, ...]
+        const newRows: { symbol: string; amount: number }[] = [];
+
+        // 1) Native SOL balance
         const solCfg = tokenConfigs.find((t) => t.native);
-        const results: { symbol: string; amount: number; usdPrice?: number }[] =
-          [];
         if (solCfg) {
           const lamports = await connection.getBalance(owner);
-          results.push({
+          newRows.push({
             symbol: solCfg.symbol,
             amount: lamports / LAMPORTS_PER_SOL,
-            usdPrice: solCfg.usdPrice,
           });
         }
 
-        // 2) SPL tokens — fetch balances by mint
-        const nonNative = tokenConfigs.filter((t) => !t.native && t.mint);
-        if (nonNative.length) {
-          // Query token accounts once, then map by mint
-          const allParsed = await connection.getParsedTokenAccountsByOwner(
-            owner,
-            {
-              programId: TOKEN_PROGRAM_ID,
-            }
-          );
-          // Optional: also check Token-2022 program in case some devnet mints are 2022
-          const allParsed2022 = await connection
-            .getParsedTokenAccountsByOwner(owner, {
-              programId: TOKEN_2022_PROGRAM_ID,
-            })
-            .catch(() => ({ value: [] as any[] }));
-
-          const all = [...allParsed.value, ...allParsed2022.value];
-
-          for (const cfg of nonNative) {
-            const mintStr = cfg.mint!;
-            const match = all.find(
-              (a) => a.account.data?.parsed?.info?.mint === mintStr
-            );
-            let amount = 0;
-            if (match) {
-              const ui = match.account.data.parsed.info.tokenAmount.uiAmount;
-              amount = typeof ui === "number" ? ui : 0;
-            }
-            results.push({
-              symbol: cfg.symbol,
-              amount,
-              usdPrice: cfg.usdPrice,
-            });
+        // 2) SPL tokens: look up token accounts owned by wallet
+        // We'll query both the classic token program and Token-2022 program.
+        // NOTE: We're not filtering here by each mint individually first;
+        // we fetch everything then match.
+        const allParsed = await connection.getParsedTokenAccountsByOwner(
+          owner,
+          {
+            programId: TOKEN_PROGRAM_ID,
           }
+        );
+
+        const allParsed2022 = await connection
+          .getParsedTokenAccountsByOwner(owner, {
+            programId: TOKEN_2022_PROGRAM_ID,
+          })
+          .catch(() => ({ value: [] as any[] })); // if call fails, just treat as empty
+
+        const allTokenAccounts = [
+          ...allParsed.value,
+          ...allParsed2022.value,
+        ];
+
+        // For each non-native token config, find the matching ATA balance
+        for (const cfg of tokenConfigs.filter((t) => !t.native && t.mint)) {
+          const mintStr = cfg.mint!;
+          const match = allTokenAccounts.find(
+            (a) => a.account.data?.parsed?.info?.mint === mintStr
+          );
+
+          let amount = 0;
+          if (match) {
+            const uiAmt =
+              match.account.data?.parsed?.info?.tokenAmount?.uiAmount;
+            amount = typeof uiAmt === "number" ? uiAmt : 0;
+          }
+
+          newRows.push({
+            symbol: cfg.symbol,
+            amount,
+          });
         }
 
-        if (!cancelled) setRows(results);
+        if (!cancelled) {
+          setRows(newRows);
+        }
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || "Failed to fetch balances");
+        if (!cancelled) {
+          setError(e?.message || "Failed to fetch balances");
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
+
     run();
+
     return () => {
       cancelled = true;
     };
   }, [address, connection, tokenConfigs]);
 
+  /**
+   * totalUSD
+   * ------------------------------------------------------------
+   * Sum over all rows: amount * livePrice(symbol).
+   * If a price isn't available yet, treat it as 0 for total.
+   */
   const totalUSD = useMemo(() => {
-    return rows.reduce(
-      (acc, r) => acc + (r.usdPrice ? r.amount * r.usdPrice : 0),
-      0
-    );
-  }, [rows]);
+    return rows.reduce((acc, row) => {
+      const livePx = livePricesBySymbol[row.symbol];
+      if (livePx === undefined || livePx === null) return acc;
+      return acc + row.amount * livePx;
+    }, 0);
+  }, [rows, livePricesBySymbol]);
 
   return (
     <div className="space-y-4 w-full">
-      {/* Wallet card */}
+      {/* WALLET CARD */}
       <div className="rounded-2xl border border-[#232322] bg-transparent shadow-sm">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="text-lg font-semibold">{title}</h2>
           <div className="text-sm font-bold text-white">
-            {address ? `$${totalUSD.toFixed(2)}` : "$0.00"}
+            {address
+              ? `$${totalUSD.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}`
+              : "$0.00"}
           </div>
         </div>
 
@@ -184,11 +255,12 @@ export default function DevnetWalletPanel({
 
         {address && (
           <div className="px-5 pb-5">
+            {/* header row */}
             <div className="grid grid-cols-4 text-xs font-medium text-gray-500 px-1 pt-4 pb-2">
               <div>Assets</div>
+              <div className="text-right">Price</div>
+              <div className="text-right">Tokens</div>
               <div className="text-right">Amount</div>
-              <div className="text-right">Value</div>
-              <div className="text-right"></div>
             </div>
 
             {loading && (
@@ -196,39 +268,65 @@ export default function DevnetWalletPanel({
                 Loading balances…
               </div>
             )}
+
             {error && (
               <div className="px-1 py-3 text-sm text-red-600">{error}</div>
             )}
 
+            {/* rows */}
             <div className="divide-y">
               {rows.map((r) => {
-                const value = r.usdPrice ? r.amount * r.usdPrice : undefined;
+                const livePx = livePricesBySymbol[r.symbol];
+                const rowUsdValue =
+                  livePx !== undefined && livePx !== null
+                    ? r.amount * livePx
+                    : undefined;
+
                 return (
                   <div
                     key={r.symbol}
                     className="grid grid-cols-4 items-center px-1 py-3 text-sm"
                   >
+                    {/* Asset symbol + icon */}
                     <div className="flex items-center gap-3">
-                      {getTokenIcon(r.symbol as string) && (
+                      {getTokenIcon(r.symbol) && (
                         <Image
-                          src={getTokenIcon(r.symbol as string) as any}
+                          src={getTokenIcon(r.symbol) as any}
                           alt="logo"
                           height={18}
                           width={18}
                         />
                       )}
-                      <span className="font-medium text-white">{r.symbol}</span>
+                      <span className="font-medium text-white">
+                        {r.symbol}
+                      </span>
                     </div>
+
+                    {/* USD price per token */}
                     <div className="text-right">
-                      {r.usdPrice != null ? `$${r.usdPrice.toFixed(2)}` : "—"}
+                      {livePx !== undefined && livePx !== null
+                        ? `$${livePx.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}`
+                        : "—"}
                     </div>
+
+                    {/* Token balance */}
                     <div className="text-right">
                       {r.amount.toLocaleString(undefined, {
                         maximumFractionDigits: 6,
                       })}
                     </div>
+
+                    {/* Total USD value for that row */}
                     <div className="text-right">
-                      {value != null ? `$${value.toFixed(2)}` : "—"}
+                      {rowUsdValue !== undefined
+                        ? `$${rowUsdValue.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}`
+                        : "—"}
                     </div>
                   </div>
                 );
@@ -238,17 +336,14 @@ export default function DevnetWalletPanel({
         )}
       </div>
 
-      {/* Yield opportunities placeholder (static for now) */}
+      {/* YIELD OPPORTUNITIES CARD */}
       <div className="rounded-2xl border border-[#232322] bg-transparent shadow-sm">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="text-lg font-semibold">Yield opportunities</h2>
-
           <button
             className="rounded-lg p-1 hover:bg-gray-100 transition cursor-pointer"
             aria-label="collapse"
-            onClick={() => {
-              setshowYeilds(!showYeilds);
-            }}
+            onClick={() => setshowYeilds(!showYeilds)}
           >
             {!showYeilds ? (
               <ChevronUp className="h-4 w-4 text-gray-500" />
@@ -257,6 +352,7 @@ export default function DevnetWalletPanel({
             )}
           </button>
         </div>
+
         {showYeilds && (
           <div className="p-2">
             {[
@@ -266,12 +362,12 @@ export default function DevnetWalletPanel({
             ].map((op) => (
               <div
                 key={op.label}
-                className="flex items-center justify-between px-3 py-3 text-sm hover:bg-emerald-900/20 rounded-xl"
+                className="flex items-center justify-between px-3 py-3 text-sm hover:bg-[#1F1F1F] rounded-xl"
               >
                 <div className="flex items-center gap-3">
-                  {getTokenIcon(op.label as string) && (
+                  {getTokenIcon(op.label) && (
                     <Image
-                      src={getTokenIcon(op.label as string) as any}
+                      src={getTokenIcon(op.label) as any}
                       alt="logo"
                       height={18}
                       width={18}
@@ -292,7 +388,14 @@ export default function DevnetWalletPanel({
 }
 
 /**
- * Optional helper if you want a single hook elsewhere
+ * OPTIONAL: Standalone hook (kept here for convenience)
+ * ------------------------------------------------------------
+ * If you want to consume balances without the panel UI, you can
+ * use this hook directly somewhere else.
+ *
+ * Returns: { loading, error?, rows: [{symbol, amount, usdPrice?}] }
+ * The `usdPrice?` field here is only from tokenConfigs fallback,
+ * not the live oracle.
  */
 export function useDevnetBalances(args: {
   address?: string;
@@ -304,21 +407,32 @@ export function useDevnetBalances(args: {
     rpcUrl = clusterApiUrl("devnet"),
     tokenConfigs = DEFAULT_TOKENS,
   } = args;
+
   const [state, setState] = useState<{
     loading: boolean;
     error?: string;
     rows: { symbol: string; amount: number; usdPrice?: number }[];
   }>({ loading: false, rows: [] });
+
   useEffect(() => {
     let cancelled = false;
+
     async function run() {
       if (!address) return;
+
       setState({ loading: true, rows: [] });
+
       try {
         const connection = new Connection(rpcUrl, "confirmed");
         const owner = new PublicKey(address);
-        const results: { symbol: string; amount: number; usdPrice?: number }[] =
-          [];
+
+        const results: {
+          symbol: string;
+          amount: number;
+          usdPrice?: number;
+        }[] = [];
+
+        // Native SOL
         const solCfg = tokenConfigs.find((t) => t.native);
         if (solCfg) {
           const lamports = await connection.getBalance(owner);
@@ -328,6 +442,8 @@ export function useDevnetBalances(args: {
             usdPrice: solCfg.usdPrice,
           });
         }
+
+        // Token program + Token-2022
         const allParsed = await connection.getParsedTokenAccountsByOwner(
           owner,
           { programId: TOKEN_PROGRAM_ID }
@@ -337,32 +453,43 @@ export function useDevnetBalances(args: {
             programId: TOKEN_2022_PROGRAM_ID,
           })
           .catch(() => ({ value: [] as any[] }));
+
         const all = [...allParsed.value, ...allParsed2022.value];
+
+        // SPL tokens
         for (const cfg of tokenConfigs.filter((t) => !t.native && t.mint)) {
           const match = all.find(
             (a) => a.account.data?.parsed?.info?.mint === cfg.mint
           );
-          const ui = match?.account?.data?.parsed?.info?.tokenAmount?.uiAmount;
+          const ui =
+            match?.account?.data?.parsed?.info?.tokenAmount?.uiAmount;
           results.push({
             symbol: cfg.symbol,
             amount: typeof ui === "number" ? ui : 0,
             usdPrice: cfg.usdPrice,
           });
         }
-        if (!cancelled) setState({ loading: false, rows: results });
+
+        if (!cancelled) {
+          setState({ loading: false, rows: results });
+        }
       } catch (e: any) {
-        if (!cancelled)
+        if (!cancelled) {
           setState({
             loading: false,
             rows: [],
             error: e?.message || "Failed to load balances",
           });
+        }
       }
     }
+
     run();
+
     return () => {
       cancelled = true;
     };
   }, [address, rpcUrl, JSON.stringify(tokenConfigs)]);
+
   return state;
 }

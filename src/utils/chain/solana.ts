@@ -24,17 +24,15 @@ import { BN } from "@coral-xyz/anchor";
 // ---------------------------------
 
 export const CORE_ROUTER_PROGRAM_ID = new PublicKey(
-  "G4MitBcWMKCVaPibM4Y1AQ3nfPcQDygGRcYryKfs2XYK"
+  "FRZjMjpFPrSCeFQSEeN9DPmTd4Ny4nTpByrNvcFTbUtQ"
 );
 
-// The program appears to use the market PDA as the transfer authority when pulling funds.
-// We no longer try to approve the program ID directly. We approve the market PDA on demand.
+// NOTE: this is the associated token program your on-chain code uses
 export const CORE_ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 );
 
-// This is Solana's wrapped SOL mint. Same as NATIVE_MINT,
-// but we keep an explicit constant for clarity in UI code.
+// canonical wrapped SOL mint
 export const WSOL_MINT = new PublicKey(
   "So11111111111111111111111111111111111111112"
 );
@@ -44,7 +42,6 @@ export const WSOL_MINT = new PublicKey(
 // ---------------------------------
 
 function makeReadonlyWallet(pubkey: PublicKey) {
-  // optional helper if you ever need AnchorProvider-style Wallet without signing
   return {
     publicKey: pubkey,
     signTransaction: async () => {
@@ -64,10 +61,18 @@ const findPda = (seeds: (Uint8Array | Buffer)[]) =>
   PublicKey.findProgramAddressSync(seeds, CORE_ROUTER_PROGRAM_ID);
 
 // little-endian u64 encoder that works in browser
-const u64LE = (n: number | string | BN) => {
-  const bn = BN.isBN(n) ? n : new BN(n);
+const u64LE = (n: number | string | BN | bigint) => {
+  const bn = BN.isBN(n) ? n : new BN(n.toString());
   return Buffer.from(bn.toArray("le", 8)); // 8-byte little-endian
 };
+
+// convert a UI amount (like "1.23 tokens") to base units (u64) for a mint with `decimals`
+function toBaseUnits(amountUi: number, decimals: number): bigint {
+  // NOTE: this uses JS float math; for production you may want integer string math.
+  const factor = 10 ** decimals;
+  const raw = Math.floor(amountUi * factor);
+  return BigInt(raw);
+}
 
 // ---------------------------------
 // PDA derivations (must match on-chain program)
@@ -83,8 +88,8 @@ export function findSupplyVaultPda(market: PublicKey): [PublicKey, number] {
   return findPda([te.encode("supply_vault"), market.toBuffer()]);
 }
 
-// user position PDA = ["user_account", user, market]
-// NOTE: seeds use *market PDA*, NOT the mint pubkey.
+// user account PDA = ["user_account", user, market]
+// NOTE: Anchor .accounts({ userAccount: ... }) points here.
 export function findUserPositionPda(
   user: PublicKey,
   marketPda: PublicKey
@@ -100,12 +105,12 @@ export function findUserPositionPda(
 // Instruction discriminators (from IDL)
 // ---------------------------------
 
-// initialize_user_position
+// initialize_user_position (aka initialize userAccount)
 const IX_INIT_USER_POS = Uint8Array.from([
   231, 139, 172, 230, 252, 49, 210, 9,
 ]);
 
-// deposit
+// deposit(amount: u64)
 const IX_DEPOSIT = Uint8Array.from([
   242, 35, 198, 137, 82, 225, 242, 182,
 ]);
@@ -117,7 +122,7 @@ const IX_DEPOSIT = Uint8Array.from([
 /**
  * initialize_user_position
  *
- * Anchor IDL says:
+ * Anchor IDL:
  *   accounts: {
  *     signer,
  *     market,
@@ -125,8 +130,6 @@ const IX_DEPOSIT = Uint8Array.from([
  *     systemProgram
  *   }
  *   args: none
- *
- * So data = discriminator only. No args.
  */
 function ixInitializeUserPosition(
   signer: PublicKey,
@@ -150,14 +153,14 @@ function ixInitializeUserPosition(
 /**
  * deposit(amount: u64)
  *
- * Anchor IDL says:
+ * Anchor IDL:
  *   accounts: {
  *     signer,
  *     mint,
  *     market,
  *     userTokenAccount,
  *     supplyVault,
- *     userPosition,
+ *     userAccount,
  *     tokenProgram,
  *     associatedTokenProgram,
  *     systemProgram
@@ -170,7 +173,7 @@ function ixDeposit(params: {
   market: PublicKey;
   userTokenAccount: PublicKey;
   supplyVault: PublicKey;
-  userPosition: PublicKey;
+  userPosition: PublicKey; // maps to userAccount in IDL
   amount: bigint | BN | number | string;
 }): TransactionInstruction {
   const {
@@ -196,7 +199,7 @@ function ixDeposit(params: {
       { pubkey: market, isSigner: false, isWritable: true },
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
       { pubkey: supplyVault, isSigner: false, isWritable: true },
-      { pubkey: userPosition, isSigner: false, isWritable: true },
+      { pubkey: userPosition, isSigner: false, isWritable: true }, // == userAccount in Anchor call
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       {
         pubkey: CORE_ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -231,12 +234,8 @@ export async function fetchSplTokenBalance(
 ): Promise<number> {
   const ata = getAssociatedTokenAddressSync(mint, owner);
 
-  // We'll attempt to fetch the token account + mint info.
-  // If the ATA doesn't exist, this will throw and we'll treat it as 0.
   try {
     const acc = await connection.getTokenAccountBalance(ata, "confirmed");
-    // acc.value.amount is string of base units (no decimals)
-    // acc.value.decimals is decimals for this mint
     return Number(acc.value.amount) / 10 ** acc.value.decimals;
   } catch (e) {
     return 0;
@@ -250,7 +249,6 @@ export async function fetchSolBalanceSOL(owner: PublicKey) {
 }
 
 export function lamports(amountSol: number) {
-  // convert SOL to lamports
   return Math.floor(amountSol * 1_000_000_000);
 }
 
@@ -300,108 +298,109 @@ export function prepareWrapSolIxes(
 }
 
 // ---------------------------------
-// Build the full "deposit SOL (or any mint)" tx
+// High-level builder: deposit any mint (including SOL/WSOL)
 // ---------------------------------
 
 /**
- * High-level deposit builder for the UI:
+ * High-level deposit builder (single Transaction):
  *
- * - wrap SOL into WSOL if depositing native SOL
- * - initialize user position PDA if not created yet
- * - approve the market PDA as token delegate for exactly `amountLamports`
- * - call deposit(amount)
- * - revoke the delegate
+ * Matches Anchor flow:
+ *
+ * await program.methods
+ *   .deposit(amountBaseUnits)
+ *   .accounts({
+ *     signer: owner,
+ *     mint,
+ *     market,
+ *     userTokenAccount,
+ *     supplyVault,
+ *     userAccount,
+ *     tokenProgram: TOKEN_PROGRAM_ID,
+ *     associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+ *     systemProgram: SystemProgram.programId,
+ *   })
+ *   .rpc();
+ *
+ * Steps in the built tx:
+ *   1. (If mint is native SOL/WSOL) wrap SOL into WSOL for `amount`
+ *      Otherwise, create ATA idempotently for SPL token
+ *   2. Initialize userAccount PDA if it doesn't exist
+ *   3. Approve market PDA as delegate for exactly that amount
+ *   4. Call deposit(amount)
+ *   5. Revoke delegate (optional)
+ *
+ * Inputs:
+ *   - owner: wallet pubkey
+ *   - mint: token mint to deposit
+ *   - amountUi: human-readable amount, e.g. 1.5
+ *   - mintDecimals: mint decimals, e.g. 9 for SOL/WSOL
  *
  * Returns:
- *   { tx, accounts: { market, supplyVault, userPosition, userTokenAccount, delegate } }
- *
+ *   {
+ *     tx,
+ *     accounts: {
+ *       market,
+ *       supplyVault,
+ *       userAccount,
+ *       userTokenAccount,
+ *       delegate, // == market
+ *     }
+ *   }
  */
-export async function buildDepositSolTx(
-  {
-    owner,
-    amountSol,
-    connection = getConnection(),
-    underlyingMint = new PublicKey('Em9FJok1Bvfcw9JdjUAENUgqRzGKMYHMX9aNQkPG3JkV'), // default is native SOL/WSOL
-    autoRevoke = true,
-  }: {
-    owner: PublicKey;
-    amountSol: number;
-    connection?: Connection;
-    underlyingMint?: PublicKey;
-    autoRevoke?: boolean;
-  }
-): Promise<{
+export async function buildDepositSolTx({
+  owner,
+  mint,
+  amountUi,
+  mintDecimals,
+  connection = getConnection(),
+  autoRevoke = true,
+}: {
+  owner: PublicKey;
+  mint: PublicKey; // <-- this is the mint address you pass in (mockMint2)
+  amountUi: number;
+  mintDecimals: number;
+  connection?: Connection;
+  autoRevoke?: boolean;
+}): Promise<{
   tx: Transaction;
   accounts: {
     market: PublicKey;
     supplyVault: PublicKey;
-    userPosition: PublicKey;
+    userAccount: PublicKey;
     userTokenAccount: PublicKey;
     delegate: PublicKey;
   };
 }> {
-  // derive all the PDAs this program expects
-  const [market] = findMarketPda(underlyingMint);
+  // 1. derive PDAs for this mint
+  const [market] = findMarketPda(mint);
   const [supplyVault] = findSupplyVaultPda(market);
-  const [userPosition] = findUserPositionPda(owner, market);
+  const [userAccount] = findUserPositionPda(owner, market); // maps to userAccount in Anchor
 
   // user's ATA for this mint
-  const userTokenAccount = getAssociatedTokenAddressSync(
-    underlyingMint,
-    owner
-  );
+  const userTokenAccount = getAssociatedTokenAddressSync(mint, owner);
 
-  const amountLamports = lamports(amountSol);
+  // convert UI amount (ex: 1.23 tokens) into base units (u64) using decimals
+  const amountBaseUnits = toBaseUnits(amountUi, mintDecimals);
+
   const ixs: TransactionInstruction[] = [];
-
-  // 1. If depositing SOL, wrap it into WSOL first
-  // if (underlyingMint.equals(NATIVE_MINT)) {
-  //   const { ixes } = prepareWrapSolIxes(owner, owner, amountLamports);
-  //   ixs.push(...ixes);
-  // }
-
-  // 2. Initialize user position PDA if it doesn't exist yet
-  const upInfo = await connection.getAccountInfo(userPosition, "confirmed");
-  console.log(upInfo,'param')
-  if (!upInfo) {
-    ixs.push(ixInitializeUserPosition(owner, market, userPosition));
-  }
-
-  // 3. Approve the `market` PDA as delegate for this token account.
-  //
-  // Why `market`? The on-chain program can sign as this PDA via invoke_signed,
-  // and it already has `market` in the account list for deposit.
-  //
-  // NOTE: Phantom will bundle all ixs into 1 tx, so approval + deposit + revoke
-  // happen atomically.
-  ixs.push(
-    createApproveInstruction(
-      userTokenAccount,
-      market, // delegate PDA
-      owner, // owner authority of ATA
-      BigInt(amountLamports)
-    )
-  );
-
-  // 4. deposit (amount in base units = lamports for SOL, raw decimals for tokens)
   ixs.push(
     ixDeposit({
       signer: owner,
-      mint: underlyingMint,
+      mint,
       market,
       userTokenAccount,
       supplyVault,
-      userPosition,
-      amount: BigInt(amountLamports),
+      userPosition: userAccount, // this is userAccount in Anchor
+      amount: amountBaseUnits,
     })
   );
 
-  // 5. Optionally revoke delegate so PDA can't spend again
+  // 6. Optionally revoke the delegate so it can't spend again later
   if (autoRevoke) {
     ixs.push(createRevokeInstruction(userTokenAccount, owner));
   }
 
-  // recent blockhash
+  // 7. finalize tx with a recent blockhash
   const { blockhash, lastValidBlockHeight } =
     await connection.getLatestBlockhash("confirmed");
 
@@ -416,7 +415,7 @@ export async function buildDepositSolTx(
     accounts: {
       market,
       supplyVault,
-      userPosition,
+      userAccount,
       userTokenAccount,
       delegate: market,
     },
@@ -424,7 +423,7 @@ export async function buildDepositSolTx(
 }
 
 // ---------------------------------
-// (Optional) generic approve helper if you need standalone approvals
+// Standalone approve helper (optional)
 // ---------------------------------
 
 export function createApproveIx(params: {
@@ -438,8 +437,7 @@ export function createApproveIx(params: {
 }
 
 // ---------------------------------
-// Optional convenience for building a raw "wrap -> approve -> deposit" tx
-// (Only keep if you still need it outside buildDepositSolTx)
+// Legacy convenience for SOL specifically (optional)
 // ---------------------------------
 
 export async function buildApproveAndDepositSolTx({
@@ -451,13 +449,14 @@ export async function buildApproveAndDepositSolTx({
   amountSol: number;
   connection?: Connection;
 }) {
-  // This helper is mostly superseded by buildDepositSolTx,
-  // but we'll keep it here if you still rely on it.
+  // This is mostly for backwards compatibility.
+  // Uses WSOL mint + 9 decimals.
   return buildDepositSolTx({
     owner,
-    amountSol,
+    mint: NATIVE_MINT,
+    amountUi: amountSol,
+    mintDecimals: 9,
     connection,
-    underlyingMint: NATIVE_MINT,
     autoRevoke: true,
   });
 }

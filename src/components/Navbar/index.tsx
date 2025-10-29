@@ -71,7 +71,7 @@ const useNavbarTitle = () => {
       };
     case "strategic-vaults":
       return {
-        name: "Strategic Vaults",
+        name: "Farm (50x)",
         icon: (
           <svg
             width="18"

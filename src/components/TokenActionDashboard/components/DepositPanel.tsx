@@ -21,7 +21,7 @@ import { getTokenIcon } from "@/utils/helper";
 
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { isSolanaWallet } from "@dynamic-labs/solana";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, SendTransactionError, Transaction } from "@solana/web3.js";
 
 import {
   getConnection,
@@ -29,7 +29,17 @@ import {
   buildApproveAndDepositSolTx,
   fetchSplTokenBalance,
   buildDepositSolTx,
+  WSOL_MINT,
 } from "@/utils/chain/solana";
+import {
+  buildDepositTx,
+  buildWithdrawTx,
+  extractAnchorError,
+  fetchMarketViewRawWeb3,
+  fetchProtocolHeldTokenBalance,
+  fetchUserPositionViewRawWeb3,
+  simulateForUi,
+} from "@/utils/chain/helper";
 
 function InfoRow({
   icon,
@@ -68,13 +78,16 @@ export default function DepositPanel({
   const [balance, setBalance] = React.useState<number | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [txSig, setTxSig] = React.useState("");
+  console.log(balance, "balance");
 
   const { primaryWallet, setShowAuthFlow } = useDynamicContext();
   const [pubkey, setPubkey] = React.useState<PublicKey | null>(null);
 
   const icon = getTokenIcon(lastSegment as string);
   const canDeposit = !!pubkey && amount !== "" && Number(amount) > 0 && !busy;
-
+  const NATIVE_MINT = new PublicKey(
+    "84iD9iK7Xpt4YgfscT6piausnWnVZ4bs5XqEFrtrZVZk"
+  );
   // Resolve Solana public key from Dynamic
   React.useEffect(() => {
     console.log("entry");
@@ -93,6 +106,86 @@ export default function DepositPanel({
     }
   }, [primaryWallet]);
 
+  React.useEffect(() => {
+    (async () => {
+      if (!pubkey) {
+        // setDepositedShares(null);
+        return;
+      }
+      const connection = getConnection();
+
+      const view = await fetchUserPositionViewRawWeb3({
+        owner: pubkey,
+        marketMint: NATIVE_MINT,
+        connection,
+        commitment: "confirmed",
+      });
+      console.log(view, "view");
+
+      // setDepositedShares(view.depositedSharesUi);
+      // You can also stash view.pda if you want to show "your position account" in Explorer
+    })();
+  }, [pubkey]);
+
+  const [marketData, setMarketData] = React.useState<{
+    totalDepositsUi: number;
+    totalBorrowsUi: number;
+    totalReservesUi: number;
+    utilization: number;
+    borrowApr: number;
+    supplyApr: number;
+    paused: boolean;
+  } | null>(null);
+  console.log(marketData, "marketData");
+  React.useEffect(() => {
+    (async () => {
+      if (!pubkey) return;
+
+      const connection = getConnection();
+
+      // 1. user position
+      const posView = await fetchUserPositionViewRawWeb3({
+        owner: pubkey,
+        marketMint: NATIVE_MINT,
+        connection,
+        commitment: "confirmed",
+      });
+
+      // 2. market view
+      const mv = await fetchMarketViewRawWeb3({
+        marketMint: NATIVE_MINT,
+        connection,
+        commitment: "confirmed",
+      });
+
+      // --- compute derived values ---
+      const totalDeposits = Number(mv.totalDepositsUi);
+      const totalBorrows = Number(mv.totalBorrowsUi);
+      const reserveFactor = Number(mv.reserveFactorRaw) / 10000; // assume bps
+
+      const utilization = totalDeposits > 0 ? totalBorrows / totalDeposits : 0;
+
+      // simple heuristic: base borrow APR rises with utilization
+      // e.g. 2% base + up to 20% max near full utilization
+      const baseRate = 0.02;
+      const slope1 = 0.2; // linear up to 100%
+      const borrowApr = baseRate + slope1 * utilization;
+
+      // supply APR = borrow APR * utilization * (1 - reserveFactor)
+      const supplyApr = borrowApr * utilization * (1 - reserveFactor);
+
+      setMarketData({
+        totalDepositsUi: mv.totalDepositsUi,
+        totalBorrowsUi: mv.totalBorrowsUi,
+        totalReservesUi: mv.totalReservesUi as any,
+        utilization,
+        borrowApr,
+        supplyApr,
+        paused: mv.paused,
+      });
+    })();
+  }, [pubkey]);
+
   // READ: fetch SOL balance on mount / wallet change
   React.useEffect(() => {
     (async () => {
@@ -102,25 +195,21 @@ export default function DepositPanel({
       }
       try {
         // You can use Dynamic's connection OR your own
-        const connection =
-          primaryWallet && isSolanaWallet(primaryWallet)
-            ? await primaryWallet.getConnection()
-            : getConnection();
+        const connection = getConnection();
         const sol = await fetchSolBalanceSOL(pubkey);
         const NATIVE_MINT = new PublicKey(
-          "Em9FJok1Bvfcw9JdjUAENUgqRzGKMYHMX9aNQkPG3JkV"
+          "84iD9iK7Xpt4YgfscT6piausnWnVZ4bs5XqEFrtrZVZk"
         );
 
         const bal = await fetchSplTokenBalance(pubkey, NATIVE_MINT);
         console.log("USDC balance:", bal);
-        setBalance(sol);
+
+        setBalance(bal);
       } catch {
         setBalance(null);
       }
     })();
   }, [pubkey, primaryWallet]);
-
-  // WRITE: wrap SOL -> approve -> deposit
 
   const onApproveAndDeposit = async () => {
     if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
@@ -130,26 +219,141 @@ export default function DepositPanel({
 
     setBusy(true);
     setTxSig("");
+
     try {
       const value = Number(amount);
       if (value <= 0) throw new Error("Enter valid amount");
 
       const connection = getConnection();
-      console.log(connection, "connect");
-      const { tx } = await buildDepositSolTx({
+
+      // 1. get instruction + PDAs (no blockhash yet)
+      const { ix } = await buildDepositTx({
         owner: pubkey,
-        amountSol: value,
+        mint: new PublicKey("84iD9iK7Xpt4YgfscT6piausnWnVZ4bs5XqEFrtrZVZk"),
+        amountUi: value,
+        mintDecimals: 9,
         connection: connection as any,
       });
-      console.log(tx,'tx')
 
-      const signer = await primaryWallet.getSigner(); // Dynamic’s Solana signer
-      const res = await signer.signAndSendTransaction(tx as any);
-      const sig = typeof res === "string" ? res : res.signature;
-      setTxSig(sig);
+      // 2. create a brand new transaction using a FRESH blockhash
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("finalized"); // "processed" also fine, "finalized" more stable
 
-      await connection.confirmTransaction(sig, "confirmed");
-      setBalance(await fetchSolBalanceSOL(pubkey));
+      const freshTx = new Transaction();
+      freshTx.add(ix);
+      freshTx.feePayer = pubkey;
+      freshTx.recentBlockhash = blockhash;
+      // stash lastValidBlockHeight so we can confirm later
+      (freshTx as any)._lastValidBlockHeight = lastValidBlockHeight;
+
+      // 4. sign and send the SAME freshTx
+      const signer = await primaryWallet.getSigner();
+      const signedTx = await signer.signTransaction(freshTx as any);
+
+      try {
+        const rawTx = signedTx.serialize();
+        const sig = await connection.sendRawTransaction(rawTx, {
+          skipPreflight: false,
+          maxRetries: 3,
+        });
+
+        setTxSig(sig);
+
+        // await connection.confirmTransaction(
+        //   {
+        //     signature: sig,
+        //     blockhash: freshTx.recentBlockhash!,
+        //     lastValidBlockHeight,
+        //   },
+        //   "confirmed"
+        // );
+
+        setBalance(await fetchSplTokenBalance(pubkey, NATIVE_MINT));
+      } catch (sendErr: any) {
+        // if it's a SendTransactionError, pull logs
+        if (sendErr instanceof SendTransactionError) {
+          const logs = await sendErr.getLogs(connection);
+          console.error("SendTransactionError logs:", logs);
+        }
+        throw sendErr;
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onApproveAndWithdraw = async () => {
+    if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
+      setShowAuthFlow(true);
+      return;
+    }
+
+    setBusy(true);
+    setTxSig("");
+
+    try {
+      // 1. parse user input
+      const value = Number(amount); // the "amount to withdraw" field in your UI
+      if (value <= 0) throw new Error("Enter valid amount");
+
+      const connection = getConnection();
+
+      // 2. build withdraw instruction (no blockhash yet!)
+      const { ix } = await buildWithdrawTx({
+        owner: pubkey,
+        mint: new PublicKey("84iD9iK7Xpt4YgfscT6piausnWnVZ4bs5XqEFrtrZVZk"),
+        sharesUi: value,
+        shareDecimals: 9, // <-- IMPORTANT: this is SHARES decimals, not underlying mint decimals
+      });
+
+      // 3. get a FRESH blockhash and assemble the transaction we will actually send
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("finalized");
+
+      const freshTx = new Transaction();
+      freshTx.add(ix);
+      freshTx.feePayer = pubkey;
+      freshTx.recentBlockhash = blockhash;
+      (freshTx as any)._lastValidBlockHeight = lastValidBlockHeight;
+
+      // 4. simulate THIS tx before prompting wallet
+
+      // 5. request wallet signature
+      const signer = await primaryWallet.getSigner();
+      const signedTx = await signer.signTransaction(freshTx as any);
+
+      try {
+        // 6. broadcast
+        const rawTx = signedTx.serialize();
+        console.log(rawTx, "tx");
+        const sig = await connection.sendRawTransaction(rawTx, {
+          skipPreflight: false,
+          maxRetries: 3,
+        });
+
+        setTxSig(sig);
+
+        // 7. confirm
+        await connection.confirmTransaction(
+          {
+            signature: sig,
+            blockhash: freshTx.recentBlockhash!,
+            lastValidBlockHeight,
+          },
+          "confirmed"
+        );
+
+        // 8. refresh balances
+        setBalance(await fetchSplTokenBalance(pubkey, NATIVE_MINT));
+      } catch (sendErr: any) {
+        if (sendErr instanceof SendTransactionError) {
+          const logs = await sendErr.getLogs(connection);
+          console.error("SendTransactionError logs (withdraw):", logs);
+        }
+        throw sendErr;
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -168,7 +372,7 @@ export default function DepositPanel({
                 <p className="text-xs text-muted-foreground">
                   Wallet SOL balance{" "}
                   <span className="font-semibold">
-                    {balance === null ? "…" : balance.toFixed(4)} SOL
+                    {balance === null ? "…" : balance.toFixed(6)} SOL
                   </span>
                 </p>
               </>
