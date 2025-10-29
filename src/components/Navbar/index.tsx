@@ -11,6 +11,7 @@ import Image from "next/image";
 import solicon from "../../assets/cryptoIcons/solana-sol-logo.png";
 import { TrendingUp } from "lucide-react";
 import { useState } from "react";
+import { useToast } from "@/hooks/useToast";
 
 const prettyLabel = (slug: string) => {
   if (!slug) return "";
@@ -179,6 +180,7 @@ const Navbar = () => {
     useDynamicContext();
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
+    const {toast}=useToast()
   const handleCreateLink = async () => {
     setIsLoading(true);
     setMessage("");
@@ -207,6 +209,10 @@ const Navbar = () => {
   const copyAddress = async () => {
     if (!primaryWallet?.address) return;
     await navigator.clipboard.writeText(primaryWallet.address);
+    toast({
+        title: "Address Copied!!!",
+        description: "Your Wallet Address has been copied successfully",
+      });
   };
 
   return (

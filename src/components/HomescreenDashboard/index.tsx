@@ -127,7 +127,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
       const totalDeposits = Number(mv.totalDepositsUi);
       const totalBorrows = Number(mv.totalBorrowsUi);
       const reserveFactor = Number(mv.reserveFactorRaw) / 10000; // assume bps
-
+      const locked=Number(userPos.lockedCollateralRaw)
       const utilization = totalDeposits > 0 ? totalBorrows / totalDeposits : 0; // 0..1
 
       // aprs
@@ -143,6 +143,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
         totalSupplyUi: totalDeposits, // number
         totalBorrowUi: totalBorrows, // number
         utilizationPct: utilization * 100, // optional, handy for later
+        userLocked:locked
       });
     }
 
@@ -181,6 +182,8 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
         return acc + (row.userSupplyUsd/ 10 ** 9 * livePx);
       }, 0);
     }, [marketRows, livePricesBySymbol]);
+
+    console.log(marketRows,'rows')
 
 
   return (
@@ -402,7 +405,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
 
                               {/* Locked */}
                               <div className="text-right text-gray-300">
-                                ${((r.userSupplyUsd / 10 ** 9) * livePricesBySymbol[r.name]).toFixed(4)}
+                                ${((r.userLocked / 10 ** 9)).toFixed(4)}
                               </div>
 
                               {/* APR */}

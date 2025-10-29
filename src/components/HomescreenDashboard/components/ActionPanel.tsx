@@ -131,87 +131,192 @@ export function ActionPanel({
     }
   };
 
-  const onApproveAndWithdraw = async () => {
-    if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
-      setShowAuthFlow(true);
-      return;
-    }
+    const onApproveAndWithdraw = async () => {
+      if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
+        setShowAuthFlow(true);
+        return;
+      }
+  
+      setBusy(true);
+      setTxSig("");
+  
+      try {
+        // 1. parse user input
+        const value = Number(amount); // the "amount to withdraw" field in your UI
+        if (value <= 0) throw new Error("Enter valid amount");
+  
+        const connection = getConnection();
+  
+        // 2. build withdraw instruction (no blockhash yet!)
+        const { ix } = await buildWithdrawTx({
+          owner: pubkey,
+          mint: new PublicKey(actionPanel.mintAddress),
+          sharesUi: value,
+          shareDecimals: 9, // <-- IMPORTANT: this is SHARES decimals, not underlying mint decimals
+        });
+  
+        // 3. get a FRESH blockhash and assemble the transaction we will actually send
+        const { blockhash, lastValidBlockHeight } =
+          await connection.getLatestBlockhash("finalized");
+  
+        const freshTx = new Transaction();
+        freshTx.add(ix);
+        freshTx.feePayer = pubkey;
+        freshTx.recentBlockhash = blockhash;
+        (freshTx as any)._lastValidBlockHeight = lastValidBlockHeight;
+  
+        // 4. simulate THIS tx before prompting wallet
+  
+        // 5. request wallet signature
+        const signer = await primaryWallet.getSigner();
+        const signedTx = await signer.signTransaction(freshTx as any);
+  
+        try {
+          // 6. broadcast
+          const rawTx = signedTx.serialize();
+                console.log(rawTx,'tx')
+          const sig = await connection.sendRawTransaction(rawTx, {
+            skipPreflight: false,
+            maxRetries: 3,
+          });
+  
+          setTxSig(sig);
+  
+          // 7. confirm
+          await connection.confirmTransaction(
+            {
+              signature: sig,
+              blockhash: freshTx.recentBlockhash!,
+              lastValidBlockHeight,
+            },
+            "confirmed"
+          );
+  
+          // 8. refresh balances
+          setBalance(await fetchSplTokenBalance(pubkey, new PublicKey(actionPanel.mintAddress)));
+        } catch (sendErr: any) {
+          if (sendErr instanceof SendTransactionError) {
+            const logs = await sendErr.getLogs(connection);
+            console.error("SendTransactionError logs (withdraw):", logs);
+          }
+          throw sendErr;
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setBusy(false);
+      }
+    };
 
-    setBusy(true);
-    setTxSig("");
+const onBorrow = async () => {
+  if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
+    setShowAuthFlow(true);
+    return;
+  }
+
+  setBusy(true);
+  setTxSig("");
+
+  try {
+    const collateralVal = Number(amount); // UI state
+    const borrowVal = Number(amount); // UI state
+
+    if (collateralVal <= 0) throw new Error("Enter valid collateral");
+    if (borrowVal <= 0) throw new Error("Enter valid borrow amount");
+
+    const connection = getConnection();
+    const priceUpdateCollateralAddress =
+  "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"; // SOL price account
+const priceUpdateBorrowAddress =
+  "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"; // USDC price account
+
+
+    // pre-parse addresses from whatever state you keep them in
+    const collateralMintPk = new PublicKey(actionPanel.mintAddress);
+    const borrowMintPk = new PublicKey(actionPanel.mintAddress);
+
+    // pyth price accounts (must already be known/loaded in UI or config)
+    const priceUpdateCollateralPk = new PublicKey(
+      priceUpdateCollateralAddress
+    );
+    const priceUpdateBorrowPk = new PublicKey(priceUpdateBorrowAddress);
+
+    // 1. build instruction (does PDA derivations + arg encoding)
+    const { ix } = await buildBorrowTx({
+      borrower: pubkey,
+      collateralMint: collateralMintPk,
+      borrowMint: borrowMintPk,
+      sharesAmountUi: collateralVal, // how much collateral to lock
+      borrowAmountUi: borrowVal, // how much to actually borrow
+      collateralMintDecimals:9, // e.g. 9 for SOL / wSOL
+      borrowMintDecimals:9, // e.g. 6 for USDC
+      priceUpdateCollateral: priceUpdateCollateralPk,
+      priceUpdateBorrow: priceUpdateBorrowPk,
+      connection: connection as any,
+    });
+    console.log(ix,'borrowix')
+
+    // 2. make a fresh tx with a fresh blockhash
+    const { blockhash, lastValidBlockHeight } =
+      await connection.getLatestBlockhash("finalized");
+
+    const freshTx = new Transaction();
+    freshTx.add(ix);
+    freshTx.feePayer = pubkey;
+    freshTx.recentBlockhash = blockhash;
+    (freshTx as any)._lastValidBlockHeight = lastValidBlockHeight;
+
+    // 3. sign using the same wallet flow you used for deposit
+    const signer = await primaryWallet.getSigner();
+    const signedTx = await signer.signTransaction(freshTx as any);
 
     try {
-      // 1. parse user input
-      const value = Number(amount); // the "amount to withdraw" field in your UI
-      if (value <= 0) throw new Error("Enter valid amount");
-
-      const connection = getConnection();
-
-      // 2. build withdraw instruction (no blockhash yet!)
-      const { ix } = await buildWithdrawTx({
-        owner: pubkey,
-        mint: new PublicKey(actionPanel.mintAddress),
-        sharesUi: value,
-        shareDecimals: 9, // <-- IMPORTANT: this is SHARES decimals, not underlying mint decimals
+      // 4. send it
+      const rawTx = signedTx.serialize();
+      const sig = await connection.sendRawTransaction(rawTx, {
+        skipPreflight: false,
+        maxRetries: 3,
       });
 
-      // 3. get a FRESH blockhash and assemble the transaction we will actually send
-      const { blockhash, lastValidBlockHeight } =
-        await connection.getLatestBlockhash("finalized");
+      setTxSig(sig);
 
-      const freshTx = new Transaction();
-      freshTx.add(ix);
-      freshTx.feePayer = pubkey;
-      freshTx.recentBlockhash = blockhash;
-      (freshTx as any)._lastValidBlockHeight = lastValidBlockHeight;
+      // optional confirm step if you want:
+      // await connection.confirmTransaction(
+      //   {
+      //     signature: sig,
+      //     blockhash: freshTx.recentBlockhash!,
+      //     lastValidBlockHeight,
+      //   },
+      //   "confirmed"
+      // );
 
-      // 4. simulate THIS tx before prompting wallet
+      //
+      // optional: refresh balances / positions in UI.
+      // for borrow you might refresh:
+      // - user's wallet balance of borrowMint (they should have more now)
+      // - user's health / LTV etc.
+      //
+      // Example pattern (customize/remove if you don't have these helpers):
+      // setBorrowMintBalance(
+      //   await fetchSplTokenBalance(pubkey, borrowMintPk)
+      // );
+      // refreshHealthFactor();
 
-      // 5. request wallet signature
-      const signer = await primaryWallet.getSigner();
-      const signedTx = await signer.signTransaction(freshTx as any);
-
-      try {
-        // 6. broadcast
-        const rawTx = signedTx.serialize();
-        console.log(rawTx, "tx");
-        const sig = await connection.sendRawTransaction(rawTx, {
-          skipPreflight: false,
-          maxRetries: 3,
-        });
-
-        setTxSig(sig);
-
-        // 7. confirm
-        await connection.confirmTransaction(
-          {
-            signature: sig,
-            blockhash: freshTx.recentBlockhash!,
-            lastValidBlockHeight,
-          },
-          "confirmed"
-        );
-
-        // 8. refresh balances
-        setBalance(
-          await fetchSplTokenBalance(
-            pubkey,
-            new PublicKey(actionPanel.mintAddress)
-          )
-        );
-      } catch (sendErr: any) {
-        if (sendErr instanceof SendTransactionError) {
-          const logs = await sendErr.getLogs(connection);
-          console.error("SendTransactionError logs (withdraw):", logs);
-        }
-        throw sendErr;
+    } catch (sendErr: any) {
+      // match your deposit flow's error logging
+      if (sendErr instanceof SendTransactionError) {
+        const logs = await sendErr.getLogs(connection);
+        console.error("SendTransactionError logs:", logs);
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setBusy(false);
+      throw sendErr;
     }
-  };
+  } catch (err) {
+    console.error(err);
+  } finally {
+    setBusy(false);
+  }
+};
+
 
   // ---------------- wallet/pubkey setup ----------------
   useEffect(() => {
@@ -515,13 +620,13 @@ export function ActionPanel({
           onClick={() => {
             if (heading === "Supply") {
               onApproveAndDeposit();
-            } else if (heading === "Withdraw") {
-              onApproveAndWithdraw();
+            }else if(heading==='Withdraw'){
+              onApproveAndWithdraw()
             }
           }}
           disabled={!canDeposit}
         >
-          {busy ? "Processing..." : heading}
+          {busy?"Processing...": heading}
         </Button>
 
         <div className="text-[11px] text-gray-500 text-center">
