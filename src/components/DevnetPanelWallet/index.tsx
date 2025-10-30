@@ -17,6 +17,8 @@ import Image from "next/image";
 import { getTokenIcon } from "@/utils/helper";
 import { PythPrice } from "@/hooks/usePrice";
 import numberFormatter from "@/utils/numberFormatter";
+import { useAtomValue } from "jotai";
+import { mintTokens } from "@/atoms/dataloaderatom";
 
 /**
  * TokenConfig
@@ -50,12 +52,12 @@ const DEFAULT_TOKENS: TokenConfig[] = [
     usdPrice: 1.0,
     programId: "token",
   },
-  {
-    symbol: "USDT",
-    mint: "Ejmc1UB4EsES5UfZyaG7kRGtCLGnogT7xWRqvEih5Z7",
-    usdPrice: 1.0,
-    programId: "token",
-  },
+  // {
+  //   symbol: "USDT",
+  //   mint: "Ejmc1UB4EsES5UfZyaG7kRGtCLGnogT7xWRqvEih5Z7",
+  //   usdPrice: 1.0,
+  //   programId: "token",
+  // },
 ];
 
 /**
@@ -92,6 +94,8 @@ export default function DevnetWalletPanel({
 }) {
   const { primaryWallet } = useDynamicContext();
   const address = primaryWallet?.address;
+  const mintToken=useAtomValue(mintTokens)
+  console.log(mintToken,'mint')
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -216,7 +220,7 @@ export default function DevnetWalletPanel({
     return () => {
       cancelled = true;
     };
-  }, [address, connection, tokenConfigs]);
+  }, [address, connection, tokenConfigs,mintToken]);
 
   /**
    * totalUSD

@@ -33,6 +33,8 @@ import { getDecimalsBySymbol, getMintBySymbol } from "@/utils/token";
 import numberFormatter from "@/utils/numberFormatter";
 import { isSolanaWallet } from "@dynamic-labs/solana";
 import { useRouter } from "next/navigation";
+import { useAtomValue } from "jotai";
+import { txExecuted } from "@/atoms/dataloaderatom";
 
 export default function HomeScreenDashboard({ data }: { data: any }) {
   // Mock data fallback
@@ -92,6 +94,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
   const [netWorth, setNetWorth] = useState(0);
   const [hasAnyBorrow, setHasAnyBorrow] = useState(false);
   const [userBorrows, setuserBorrows] = useState<any[]>([]);
+  const txvalue=useAtomValue(txExecuted)
 
   async function buildEnrichedMarketsForUser(walletAddress: string) {
     // turn wallet -> PublicKey
@@ -186,7 +189,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
       }, 0);
       setNetWorth(suppliedTotal / 10 ** 9);
     })();
-  }, [primaryWallet]);
+  }, [primaryWallet,txvalue]);
 
   useEffect(() => {
     if (
@@ -284,7 +287,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
     return () => {
       cancelled = true;
     };
-  }, [pubkey]);
+  }, [pubkey,txvalue]);
 
   const totalSupply = useMemo(() => {
     return marketRows.reduce((acc, row) => {
@@ -584,7 +587,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                   </div>
 
                   {/* Debt Positions */}
-                  <div className="rounded-2xl border border-[#232322] bg-transparent shadow-sm">
+                  {userBorrows.length>0 &&<div className="rounded-2xl border border-[#232322] bg-transparent shadow-sm">
                     {/* Card header */}
                     <div className="flex items-center justify-between p-5 border-b border-[#232322]">
                       <h2 className="text-lg font-semibold text-white">
@@ -754,7 +757,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                         </div>
                       </div>
                     )}
-                  </div>
+                  </div>}
                 </>
               )}
 
@@ -854,6 +857,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
               <ActionPanel
                 actionPanel={actionPanel}
                 onClose={() => setActionPanel(null)}
+                livePricesBySymbol={livePricesBySymbol}
               />
             )}
           </div>

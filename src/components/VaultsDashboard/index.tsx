@@ -400,6 +400,7 @@ export default function VaultDashboard() {
               <ActionPanel
                 actionPanel={actionPanel}
                 onClose={() => setActionPanel(null)}
+                livePricesBySymbol={livePricesBySymbol as any}
               />
             </div>
           )}

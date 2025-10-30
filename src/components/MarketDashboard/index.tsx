@@ -20,6 +20,8 @@ import {
 import { usePythPrice } from "@/hooks/usePrice";
 import { getDecimalsBySymbol } from "@/utils/token";
 import numberFormatter from "@/utils/numberFormatter";
+import { useAtomValue } from "jotai";
+import { txExecuted } from "@/atoms/dataloaderatom";
 
 // Static base metadata per market (icon, symbol text etc.)
 export const markets = [
@@ -49,19 +51,19 @@ export const markets = [
     icon: usdcicon,
     mintAddress: "qZRfe9iy2zNhUnLK9FPDh2bxF7g5vDx3FcyXb4Di72Q",
   },
-  {
-    name: "USDT",
-    symbol: "Tether USD",
-    price: "$0.9995",
-    apy: "+8.18%",
-    apr: "3.84%",
-    totalSupply: "$1.52M",
-    totalBorrow: "$1.02M",
-    tier: "Shared",
-    rewards: true,
-    icon: usdticon,
-    mintAddress: "AKss9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf",
-  },
+  // {
+  //   name: "USDT",
+  //   symbol: "Tether USD",
+  //   price: "$0.9995",
+  //   apy: "+8.18%",
+  //   apr: "3.84%",
+  //   totalSupply: "$1.52M",
+  //   totalBorrow: "$1.02M",
+  //   tier: "Shared",
+  //   rewards: true,
+  //   icon: usdticon,
+  //   mintAddress: "AKss9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf",
+  // },
 ];
 
 export default function MarketDashboard() {
@@ -94,9 +96,12 @@ export default function MarketDashboard() {
       | "borrow";
     asset: string;
     mintAddress: string;
+    availableBorrowBalance?:number
+    marketRows?:any[]
   }>(null);
 
   const router = useRouter();
+  const txvalue=useAtomValue(txExecuted)
 
   // on-chain market stats / APY calc
   const [marketRows, setMarketRows] = useState<any[]>([]);
@@ -176,7 +181,7 @@ export default function MarketDashboard() {
         setIsRowsLoading(false);
       }
     })();
-  }, []);
+  }, [txvalue]);
 
   // current tab filter, but applied after enrichment so APY etc. comes along
   const filteredMarkets = useMemo(() => {
@@ -339,6 +344,8 @@ export default function MarketDashboard() {
                                     type: "borrow",
                                     asset: String(m.name),
                                     mintAddress: m.mintAddress,
+                                    availableBorrowBalance:(m.totalSupplyUi / 10 ** getDecimalsBySymbol(m.name))-(m.totalBorrowUi / 10 ** (getDecimalsBySymbol(m.name))),
+                                    marketRows:marketRows
                                   })
                                 }
                               >
@@ -391,6 +398,7 @@ export default function MarketDashboard() {
                 <ActionPanel
                   actionPanel={actionPanel}
                   onClose={() => setActionPanel(null)}
+                  livePricesBySymbol={livePricesBySymbol}
                 />
               )}
             </div>

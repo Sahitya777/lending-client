@@ -5,6 +5,8 @@ import Image from "next/image";
 import { Button } from "../ui/button";
 import { markets } from "../MarketDashboard";
 import { useToast } from "@/hooks/useToast";
+import { useAtomValue, useSetAtom } from "jotai";
+import { mintTokens } from "@/atoms/dataloaderatom";
 
 const TestTokensModal = ({
   openModal,
@@ -17,6 +19,8 @@ const TestTokensModal = ({
 }) => {
   const [isMinting, setIsMinting] = useState<string | null>(null);
   const { toast } = useToast();
+  const setMintToken=useSetAtom(mintTokens)
+  const mintToken=useAtomValue(mintTokens)
   const handleMint = async (tokenName: string, mintAddress: string) => {
     if (!connectedPubkey) {
       alert("Please connect your wallet first.");
@@ -43,6 +47,7 @@ const TestTokensModal = ({
           title: "Mint Successfull",
           description: `10 ${tokenName} have been minted successfully to your account`,
         });
+        setMintToken(!mintToken)
         setOpenModal(false)
         // alert(`Mint success. tx: ${json.signature}`);
         // optionally refresh UI, fetch token balances, etc.

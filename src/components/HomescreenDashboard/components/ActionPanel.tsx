@@ -27,15 +27,25 @@ import { markets } from "@/components/MarketDashboard";
 import { useToast } from "@/hooks/useToast";
 import { getDecimalsBySymbol } from "@/utils/token";
 import numberFormatter from "@/utils/numberFormatter";
+import { useAtomValue, useSetAtom } from "jotai";
+import { txExecuted } from "@/atoms/dataloaderatom";
 
 export function ActionPanel({
   actionPanel,
+  livePricesBySymbol,
   onClose,
 }: {
-  actionPanel: { type: string; asset: string; mintAddress: string,borrowAseet?:string };
+  actionPanel: {
+    type: string;
+    asset: string;
+    mintAddress: string;
+    borrowAseet?: string;
+    availableBorrowBalance?: number;
+    marketRows?: any[];
+  };
+  livePricesBySymbol:Record<string, number>
   onClose: () => void;
 }) {
-  console.log(actionPanel, "act");
   const prettyTitleMap: Record<string, string> = {
     supply: "Supply",
     withdraw: "Withdraw",
@@ -44,6 +54,7 @@ export function ActionPanel({
     addCollateral: "Add collateral",
     borrow: "Borrow",
   };
+  console.log(livePricesBySymbol,'prices')
 
   const heading = prettyTitleMap[actionPanel.type] || "Action";
   const isSpend = actionPanel.type === "spend";
@@ -58,6 +69,7 @@ export function ActionPanel({
 
   // Wallet balance in token units
   const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [borrowwalletBalance, setborrowwalletBalance] = useState<number>(0);
 
   const [balance, setBalance] = useState<number | null>(null);
   const { primaryWallet, setShowAuthFlow } = useDynamicContext();
@@ -70,14 +82,41 @@ export function ActionPanel({
   const borrowDraggingRef = useRef(false);
   const collateralSliderRef = useRef<HTMLDivElement | null>(null);
   const borrowSliderRef = useRef<HTMLDivElement | null>(null);
-  const marketOptions = ["SOL", "USDC", "USDT"];
+  const marketOptions = ["SOL", "USDC"];
   const [activeTab, setActiveTab] = useState<"liquidity" | "swap">("liquidity");
   const [selectedDapp, setSelectedDapp] = useState<string>("Select Dapp");
   const [selectedMarket, setSelectedMarket] = useState<string>(
     actionPanel.asset
   );
-  const [selectedBorrowMarket, setSelectedBorrowMarket] =
-    useState<string>("USDC");
+  const settxExecute = useSetAtom(txExecuted);
+  const txvalue = useAtomValue(txExecuted);
+  const [selectedBorrowMarket, setSelectedBorrowMarket] = useState<string>(
+    actionPanel.asset
+  );
+  
+
+  const computeAvailable = (m: any) => {
+    const decimals = getDecimalsBySymbol(m.name);
+    const scale = 10 ** decimals;
+    return m.totalSupplyUi / scale - m.totalBorrowUi / scale;
+  };
+  const { marketRows = [] } = actionPanel;
+  const selectedMarketRow = useMemo(() => {
+    const byName = marketRows.find((m) => m.name === selectedBorrowMarket);
+    return (
+      byName ??
+      marketRows.find((m) => m.mintAddress === actionPanel.mintAddress)
+    );
+  }, [marketRows, selectedBorrowMarket, actionPanel.mintAddress]);
+
+  const availableBorrowBalance = selectedMarketRow
+    ? computeAvailable(selectedMarketRow)
+    : 0;
+
+  useEffect(() => {
+    setborrowwalletBalance(availableBorrowBalance);
+  }, [availableBorrowBalance]);
+
   const borrowMint = useMemo(() => {
     const m = markets.find(
       (m) => m.name.toLowerCase() === selectedBorrowMarket.toLowerCase()
@@ -122,7 +161,7 @@ export function ActionPanel({
 
       const { ix } = await buildDepositTx({
         owner: pubkey,
-        mint: new PublicKey(actionPanel.mintAddress),
+        mint: new PublicKey(supplyMint),
         amountUi: value,
         mintDecimals: getDecimalsBySymbol(selectedMarket),
         connection: connection as any,
@@ -152,15 +191,13 @@ export function ActionPanel({
             10 ** getDecimalsBySymbol(selectedMarket)
         );
         setWalletBalance(
-          await fetchSplTokenBalance(
-            pubkey,
-            new PublicKey(actionPanel.mintAddress)
-          )
+          await fetchSplTokenBalance(pubkey, new PublicKey(supplyMint))
         );
         toast({
           title: "Deposit Successfull",
           description: `You have successfully deposited ${amount} ${selectedMarket}`,
         });
+        settxExecute(!txvalue);
         resetStates();
       } catch (sendErr: any) {
         if (sendErr instanceof SendTransactionError) {
@@ -191,7 +228,7 @@ export function ActionPanel({
 
       const { ix } = await buildWithdrawTx({
         owner: pubkey,
-        mint: new PublicKey(actionPanel.mintAddress),
+        mint: new PublicKey(supplyMint),
         sharesUi: value,
         shareDecimals: getDecimalsBySymbol(selectedMarket),
       });
@@ -227,6 +264,7 @@ export function ActionPanel({
           title: "Withdraw Successfull",
           description: `You have successfully withdrawed ${amount} ${selectedMarket}`,
         });
+        settxExecute(!txvalue);
         resetStates();
       } catch (sendErr: any) {
         if (sendErr instanceof SendTransactionError) {
@@ -265,10 +303,7 @@ export function ActionPanel({
       // 1. connection
       const connection = getConnection();
 
-      // 2. assets config
-      const collateralCfg = actionPanel.mintAddress;
-
-      const collateralMintPk = new PublicKey(collateralCfg);
+      const collateralMintPk = new PublicKey(supplyMint);
       const borrowMintPk = new PublicKey(borrowMint);
       const signer = await primaryWallet.getSigner();
       // 3. prep wallet adapter for PythSolanaReceiver
@@ -310,6 +345,13 @@ export function ActionPanel({
         )
         .toBase58();
 
+      const usdcUsdPriceFeedAccount = pythSolanaReceiver
+        .getPriceFeedAccountAddress(
+          0,
+          "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a"
+        )
+        .toBase58();
+
       const hermes = new HermesClient("https://hermes.pyth.network/");
       console.log(
         "Fetching price updates from Hermes for SOL and USDT feeds..."
@@ -318,7 +360,7 @@ export function ActionPanel({
         await hermes.getLatestPriceUpdates(
           [
             "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
-            "2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b",
+            "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a",
           ],
           { encoding: "base64" }
         )
@@ -351,8 +393,16 @@ export function ActionPanel({
         borrowAmountUi: borrowVal,
         collateralMintDecimals: getDecimalsBySymbol(selectedMarket),
         borrowMintDecimals: getDecimalsBySymbol(selectedBorrowMarket),
-        priceUpdateCollateral: new PublicKey(solUsdPriceFeedAccount),
-        priceUpdateBorrow: new PublicKey(solUsdPriceFeedAccount),
+        priceUpdateCollateral: new PublicKey(
+          selectedMarket === "USDC"
+            ? usdcUsdPriceFeedAccount
+            : solUsdPriceFeedAccount
+        ),
+        priceUpdateBorrow: new PublicKey(
+          selectedBorrowMarket === "USDC"
+            ? usdcUsdPriceFeedAccount
+            : solUsdPriceFeedAccount
+        ),
         connection: connection as any,
       });
 
@@ -367,31 +417,84 @@ export function ActionPanel({
 
       const signedTx = await signer.signTransaction(freshTx as any);
       try {
-        const rawTx = signedTx.serialize();
-        const sig = await connection.sendRawTransaction(rawTx, {
-          skipPreflight: false,
-          maxRetries: 3,
-        });
-
-        setTxSig(sig);
-
-        await connection.confirmTransaction(
-          {
-            signature: sig,
-            blockhash: freshTx.recentBlockhash!,
-            lastValidBlockHeight,
-          },
-          "confirmed"
-        );
-
         setBalance(
-          await fetchSplTokenBalance(
-            pubkey,
-            new PublicKey(actionPanel.mintAddress)
-          )
+          await fetchSplTokenBalance(pubkey, new PublicKey(supplyMint))
         );
+        resetStates();
+        settxExecute(!txvalue);
       } catch (sendErr: any) {
         if (sendErr instanceof SendTransactionError) {
+        }
+        throw sendErr;
+      }
+    } catch (err) {
+      console.error(err, "err in borro");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onRepay = async () => {
+    if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
+      setShowAuthFlow(true);
+      return;
+    }
+
+    setBusy(true);
+    setTxSig("");
+
+    try {
+      const repayVal = Number(amount); // <-- your input state
+      if (!Number.isFinite(repayVal) || repayVal <= 0) {
+        throw new Error("Enter valid repay amount");
+      }
+
+      // 1) connection
+      const connection = getConnection();
+
+      // 2) assets / mints
+      //   - collateral mint stays the same market you borrowed against
+      //   - borrowMint is the underlying you're repaying (e.g., USDT/USDC)
+      const collateralMintPk = new PublicKey(supplyMint);
+      const borrowMintPk = new PublicKey(borrowMint);
+
+      // 3) signer (adapter compat)
+      const signer = await primaryWallet.getSigner();
+
+      // 4) build repay instruction
+      const { ix } = await buildRepayTx({
+        borrower: pubkey,
+        collateralMint: collateralMintPk,
+        borrowMint: borrowMintPk,
+        repayAmountUi: repayVal,
+        borrowMintDecimals: getDecimalsBySymbol(selectedBorrowMarket),
+      });
+
+      // 5) assemble & send
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("finalized");
+
+      const tx = new Transaction();
+      tx.add(ix);
+      tx.feePayer = pubkey;
+      tx.recentBlockhash = blockhash;
+      (tx as any)._lastValidBlockHeight = lastValidBlockHeight;
+
+      const signedTx = await signer.signTransaction(tx as any);
+
+      try {
+        // 6) refresh balances / positions as you already do
+        setBalance(
+          await fetchSplTokenBalance(pubkey, new PublicKey(supplyMint))
+        );
+        settxExecute(!txvalue);
+        // optional: refresh borrow-token balance too
+        // setBorrowTokenBalance(await fetchSplTokenBalance(pubkey, borrowMintPk));
+        // optional: refresh user loans list
+        // setUserLoans(await fetchAllLoansForUser({ connection, borrower: pubkey }));
+      } catch (sendErr: any) {
+        if (sendErr instanceof SendTransactionError) {
+          // handle UI-specific error formatting if you want
         }
         throw sendErr;
       }
@@ -401,93 +504,6 @@ export function ActionPanel({
       setBusy(false);
     }
   };
-
-  const onRepay = async () => {
-  if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
-    setShowAuthFlow(true);
-    return;
-  }
-
-  setBusy(true);
-  setTxSig("");
-
-  try {
-    const repayVal = Number(amount); // <-- your input state
-    if (!Number.isFinite(repayVal) || repayVal <= 0) {
-      throw new Error("Enter valid repay amount");
-    }
-
-    // 1) connection
-    const connection = getConnection();
-
-    // 2) assets / mints
-    //   - collateral mint stays the same market you borrowed against
-    //   - borrowMint is the underlying you're repaying (e.g., USDT/USDC)
-    const collateralMintPk = new PublicKey(supplyMint);
-    const borrowMintPk = new PublicKey(borrowMint);
-
-    // 3) signer (adapter compat)
-    const signer = await primaryWallet.getSigner();
-
-    // 4) build repay instruction
-    const { ix } = await buildRepayTx({
-      borrower: pubkey,
-      collateralMint: collateralMintPk,
-      borrowMint: borrowMintPk,
-      repayAmountUi: repayVal,
-      borrowMintDecimals: getDecimalsBySymbol(selectedBorrowMarket),
-    });
-
-    // 5) assemble & send
-    const { blockhash, lastValidBlockHeight } =
-      await connection.getLatestBlockhash("finalized");
-
-    const tx = new Transaction();
-    tx.add(ix);
-    tx.feePayer = pubkey;
-    tx.recentBlockhash = blockhash;
-    (tx as any)._lastValidBlockHeight = lastValidBlockHeight;
-
-    const signedTx = await signer.signTransaction(tx as any);
-
-    try {
-      const raw = signedTx.serialize();
-      const sig = await connection.sendRawTransaction(raw, {
-        skipPreflight: false,
-        maxRetries: 3,
-      });
-
-      setTxSig(sig);
-
-      await connection.confirmTransaction(
-        {
-          signature: sig,
-          blockhash: tx.recentBlockhash!,
-          lastValidBlockHeight,
-        },
-        "confirmed"
-      );
-
-      // 6) refresh balances / positions as you already do
-      setBalance(
-        await fetchSplTokenBalance(pubkey, new PublicKey(actionPanel.mintAddress))
-      );
-      // optional: refresh borrow-token balance too
-      // setBorrowTokenBalance(await fetchSplTokenBalance(pubkey, borrowMintPk));
-      // optional: refresh user loans list
-      // setUserLoans(await fetchAllLoansForUser({ connection, borrower: pubkey }));
-    } catch (sendErr: any) {
-      if (sendErr instanceof SendTransactionError) {
-        // handle UI-specific error formatting if you want
-      }
-      throw sendErr;
-    }
-  } catch (err) {
-    console.error(err);
-  } finally {
-    setBusy(false);
-  }
-};
 
   // ---------- wallet / balances ----------
   useEffect(() => {
@@ -615,29 +631,29 @@ export function ActionPanel({
       const pct = Math.max(0, Math.min(100, pctRaw));
       setBorrowPct(pct);
 
-      if (walletBalance > 0) {
-        const nextAmount = (walletBalance * pct) / 100;
+      if (borrowwalletBalance > 0) {
+        const nextAmount = (borrowwalletBalance * pct) / 100;
         setBorrowAmount(nextAmount);
       } else {
         setBorrowAmount(0);
       }
     },
-    [walletBalance]
+    [borrowwalletBalance]
   );
 
   const updateFromBorrowAmount = useCallback(
     (amtRaw: number) => {
       const amt = Math.max(
         0,
-        Math.min(isFinite(amtRaw) ? amtRaw : 0, walletBalance || 0)
+        Math.min(isFinite(amtRaw) ? amtRaw : 0, borrowwalletBalance || 0)
       );
 
       setBorrowAmount(amt);
 
-      const pct = walletBalance > 0 ? (amt / walletBalance) * 100 : 0;
+      const pct = borrowwalletBalance > 0 ? (amt / borrowwalletBalance) * 100 : 0;
       setBorrowPct(pct);
     },
-    [walletBalance]
+    [borrowwalletBalance]
   );
 
   // ---------- slider math (separate for each slider) ----------
@@ -888,7 +904,7 @@ export function ActionPanel({
                 </div>
 
                 <div className="text-[11px] text-gray-500 flex justify-between">
-                  <span>$123.45</span>
+                  <span>${numberFormatter(livePricesBySymbol[selectedMarket]*amount)}</span>
                   <span className="text-[#8D8D8C] flex gap-1">
                     {actionPanel.type === "withdraw"
                       ? "Balance:"
@@ -1052,11 +1068,11 @@ export function ActionPanel({
                   </div>
 
                   <div className="text-[11px] text-gray-500 flex justify-between">
-                    <span>$123.45</span>
+                    <span>${numberFormatter(livePricesBySymbol[selectedBorrowMarket]*borrowAmount)}</span>
                     <span className="text-[#8D8D8C] flex gap-1">
                       Available Balance:{" "}
                       <span className="text-white">
-                        {walletBalance} {selectedBorrowMarket}
+                        {borrowwalletBalance} {selectedBorrowMarket}
                       </span>
                     </span>
                   </div>
@@ -1107,9 +1123,9 @@ export function ActionPanel({
         {/* Breakdown */}
         {!(activeTab === "swap" && isSpend) && (
           <div className="rounded-xl border border-[#27272A] p-4 space-y-3 text-[12px]">
-            <Row label="Borrow amount" value="$0.00" />
+            {/* <Row label="Borrow amount" value="$0.00" />
             <Row label="Min collateral allowed" value="$12.97" />
-            <Row label="Est. collateral value" value="$58.97" />
+            <Row label="Est. collateral value" value="$58.97" /> */}
             <Row label="Fees" value="$0.01" />
             <Row label="Gas estimate" value="$0.01" />
           </div>
@@ -1125,8 +1141,8 @@ export function ActionPanel({
               onApproveAndWithdraw();
             } else if (heading === "Borrow") {
               onBorrow();
-            }else if(heading==='Repay debt'){
-              onRepay()
+            } else if (heading === "Repay debt") {
+              onRepay();
             }
           }}
           disabled={!canDeposit && heading !== "Borrow"}

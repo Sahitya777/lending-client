@@ -4,6 +4,7 @@ import "./globals.css";
 import { DynamicContextProvider } from "@dynamic-labs/sdk-react-core";
 import { SolanaWalletConnectors } from "@dynamic-labs/solana";
 import { Toaster } from "@/components/ui/toaster";
+import { Provider } from 'jotai'
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -60,8 +61,10 @@ export default function RootLayout({
             walletConnectors: [SolanaWalletConnectors],
           }}
         >
-          <Toaster />
-          {children}
+          <Provider>
+            <Toaster />
+            {children}
+          </Provider>
         </DynamicContextProvider>
       </body>
     </html>
