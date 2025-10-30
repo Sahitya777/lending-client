@@ -32,6 +32,7 @@ import {
 import { getDecimalsBySymbol, getMintBySymbol } from "@/utils/token";
 import numberFormatter from "@/utils/numberFormatter";
 import { isSolanaWallet } from "@dynamic-labs/solana";
+import { useRouter } from "next/navigation";
 
 export default function HomeScreenDashboard({ data }: { data: any }) {
   // Mock data fallback
@@ -78,6 +79,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
     USDT: usdt?.price ?? 0,
     USDC: usdc?.price ?? 0,
   };
+  const router=useRouter()
 
   // this controls the right-side "action drawer"
   const [actionPanel, setActionPanel] = useState<null | {
@@ -774,7 +776,9 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
 
                       <div className="mt-6 flex w-full items-start justify-between">
                         <div className="flex md:justify-end">
-                          <button className="rounded-md bg-[#FECD6D] hover:bg-[#fece6dd5] text-black cursor-pointer  px-5 py-2.5 text-sm font-semibold shadow  transition">
+                          <button className="rounded-md bg-[#FECD6D] hover:bg-[#fece6dd5] text-black cursor-pointer  px-5 py-2.5 text-sm font-semibold shadow  transition" onClick={()=>{
+                            router.push('/markets')
+                          }}>
                             Deposit now
                           </button>
                         </div>
@@ -804,7 +808,9 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
 
                       <div className="mt-6 flex w-full items-start justify-between">
                         <div className="flex md:justify-end">
-                          <button className="rounded-md bg-[#FECD6D] hover:bg-[#fece6dd5] text-black cursor-pointer px-5 py-2.5 text-sm font-semibold shadow  transition">
+                          <button className="rounded-md bg-[#FECD6D] hover:bg-[#fece6dd5] text-black cursor-pointer px-5 py-2.5 text-sm font-semibold shadow  transition" onClick={()=>{
+                            router.push('/markets')
+                          }}>
                             Deposit now
                           </button>
                         </div>

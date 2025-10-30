@@ -1,4 +1,3 @@
-'use client'
 import MarketDashboard from '@/components/MarketDashboard'
 import Navbar from '@/components/Navbar'
 import Sidebar from '@/components/Sidebar'
