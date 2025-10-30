@@ -122,13 +122,13 @@ export function ActionPanel({
     const m = markets.find(
       (m) => m.name.toLowerCase() === selectedBorrowMarket.toLowerCase()
     );
-    return m?.mintAddress ?? "AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf";
+    return m?.mintAddress ?? "6SHAjCy7dMASzXuB2RfLdu59yJvz1BfAoQFrcrom3QV8";
   }, [selectedBorrowMarket]);
   const supplyMint = useMemo(() => {
     const m = markets.find(
       (m) => m.name.toLowerCase() === selectedMarket.toLowerCase()
     );
-    return m?.mintAddress ?? "AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf";
+    return m?.mintAddress ?? "6SHAjCy7dMASzXuB2RfLdu59yJvz1BfAoQFrcrom3QV8";
   }, [selectedMarket]);
   const { toast } = useToast();
 
@@ -375,6 +375,19 @@ export function ActionPanel({
         )
       ).binary.data;
 
+      const getFeedAccount = (symbol: string) => {
+  switch (symbol) {
+    case "SOL":
+      return solUsdPriceFeedAccount;
+    case "USDC":
+      return usdcUsdPriceFeedAccount;
+    case "USDT":
+      return usdtUsdPriceFeedAccount;
+    default:
+      throw new Error(`Unsupported market symbol: ${symbol}`);
+  }
+};
+
       // (2) build and send post-price-updates with keeper
       const txBuilder = pythSolanaReceiver.newTransactionBuilder({
         closeUpdateAccounts: false,
@@ -402,6 +415,7 @@ export function ActionPanel({
       // ----------------------------
       // B) BUILD + SIGN USER BORROW TX (single tx for the user)
       // ----------------------------
+      console.log(borrowVal,collateralVal,selectedBorrowMarket,selectedMarket,supplyMint,borrowMint,getDecimalsBySymbol(selectedMarket),getDecimalsBySymbol(selectedBorrowMarket),'innerparam')
       const { ix } = await buildBorrowTx({
         borrower: pubkey,
         collateralMint: collateralMintPk,
@@ -410,16 +424,8 @@ export function ActionPanel({
         borrowAmountUi: borrowVal,
         collateralMintDecimals: getDecimalsBySymbol(selectedMarket),
         borrowMintDecimals: getDecimalsBySymbol(selectedBorrowMarket),
-        priceUpdateCollateral: new PublicKey(
-          selectedMarket === "USDC"
-            ? usdcUsdPriceFeedAccount
-            : solUsdPriceFeedAccount
-        ),
-        priceUpdateBorrow: new PublicKey(
-          selectedBorrowMarket === "USDC"
-            ? usdcUsdPriceFeedAccount
-            : solUsdPriceFeedAccount
-        ),
+        priceUpdateCollateral: new PublicKey(getFeedAccount(selectedMarket)),
+        priceUpdateBorrow: new PublicKey(getFeedAccount(selectedBorrowMarket)),
         connection: connection as any,
       });
 

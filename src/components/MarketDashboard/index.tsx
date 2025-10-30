@@ -36,7 +36,7 @@ export const markets = [
     tier: "Shared",
     rewards: true,
     icon: solicon,
-    mintAddress: "AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf",
+    mintAddress: "6SHAjCy7dMASzXuB2RfLdu59yJvz1BfAoQFrcrom3QV8",
   },
   {
     name: "USDC",
@@ -49,7 +49,7 @@ export const markets = [
     tier: "Shared",
     rewards: true,
     icon: usdcicon,
-    mintAddress: "qZRfe9iy2zNhUnLK9FPDh2bxF7g5vDx3FcyXb4Di72Q",
+    mintAddress: "54ZpVAgA688A6U7mDQM3k5xiUcxaKvDMcTEaAp447tjo",
   },
   // {
   //   name: "USDT",

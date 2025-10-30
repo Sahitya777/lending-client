@@ -43,12 +43,12 @@ export type TokenConfig = {
 const DEFAULT_TOKENS: TokenConfig[] = [
   {
     symbol: "SOL",
-     mint: "AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf",
+     mint: "6SHAjCy7dMASzXuB2RfLdu59yJvz1BfAoQFrcrom3QV8",
     usdPrice: 0.0,
   },
   {
     symbol: "USDC",
-    mint: "qZRfe9iy2zNhUnLK9FPDh2bxF7g5vDx3FcyXb4Di72Q",
+    mint: "54ZpVAgA688A6U7mDQM3k5xiUcxaKvDMcTEaAp447tjo",
     usdPrice: 1.0,
     programId: "token",
   },

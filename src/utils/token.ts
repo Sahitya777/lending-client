@@ -11,12 +11,12 @@ export type TokenMeta = {
 export const TOKENS: Record<TokenSymbol, TokenMeta> = {
   SOL:  {
     symbol: "SOL",
-    mint: "AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf",
+    mint: "6SHAjCy7dMASzXuB2RfLdu59yJvz1BfAoQFrcrom3QV8",
     decimals: 9,
   },
   USDC: {
     symbol: "USDC",
-    mint: "qZRfe9iy2zNhUnLK9FPDh2bxF7g5vDx3FcyXb4Di72Q", // mainnet
+    mint: "54ZpVAgA688A6U7mDQM3k5xiUcxaKvDMcTEaAp447tjo", // mainnet
     decimals: 6,
   },
   USDT: {

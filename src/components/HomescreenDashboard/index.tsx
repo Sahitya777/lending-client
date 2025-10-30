@@ -218,9 +218,9 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
   const MINT_SYMBOLS: Record<string, string> = {
     // add what you use
     // SOL/wSOL:xx
-    AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf: "SOL",
+    '6SHAjCy7dMASzXuB2RfLdu59yJvz1BfAoQFrcrom3QV8': "SOL",
     // USDC:
-    qZRfe9iy2zNhUnLK9FPDh2bxF7g5vDx3FcyXb4Di72Q: "USDC",
+    "54ZpVAgA688A6U7mDQM3k5xiUcxaKvDMcTEaAp447tjo": "USDC",
     // USDT:
     Es9vMFrzaCERt8r4wG9Z8GkZuzvjWcB1kGJrZ6iTnN9o: "USDT",
   };
