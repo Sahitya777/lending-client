@@ -219,7 +219,7 @@ function ixDeposit(params: {
 export const RPC_ENDPOINT = clusterApiUrl("testnet");
 
 export function getConnection() {
-  const url = process.env.NEXT_PUBLIC_RPC || "https://api.testnet.solana.com";
+  const url = process.env.NEXT_PUBLIC_RPC || "https://api.devnet.solana.com";
   return new Connection(url, "confirmed");
 }
 

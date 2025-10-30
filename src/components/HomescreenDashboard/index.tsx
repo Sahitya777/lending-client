@@ -15,12 +15,23 @@ import { PublicKey } from "@solana/web3.js";
 import { markets } from "../MarketDashboard";
 import { getConnection } from "@/utils/chain/solana";
 import {
+  decodeLoanAccount,
+  fetchAllLoansForUser,
+  fetchMarketMint,
   fetchMarketViewRawWeb3,
   fetchUserPositionViewRawWeb3,
 } from "@/utils/chain/helper";
 import { getTokenIcon } from "@/utils/helper";
 import { usePythPrice } from "@/hooks/usePrice";
-import { BTC_FEED_ID, SOL_FEED_ID, USDC_FEED_ID, USDT_FEED_ID } from "@/constants/pricefeedids";
+import {
+  BTC_FEED_ID,
+  SOL_FEED_ID,
+  USDC_FEED_ID,
+  USDT_FEED_ID,
+} from "@/constants/pricefeedids";
+import { getDecimalsBySymbol, getMintBySymbol } from "@/utils/token";
+import numberFormatter from "@/utils/numberFormatter";
+import { isSolanaWallet } from "@dynamic-labs/solana";
 
 export default function HomeScreenDashboard({ data }: { data: any }) {
   // Mock data fallback
@@ -58,11 +69,11 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
   const { user, primaryWallet } = useDynamicContext();
   const sol = usePythPrice(SOL_FEED_ID);
   const usdc = usePythPrice(USDC_FEED_ID);
-  const usdt=usePythPrice(USDT_FEED_ID)
-
+  const usdt = usePythPrice(USDT_FEED_ID);
+  const [pubkey, setPubkey] = useState<PublicKey | null>(null);
   const [showSupplyPositions, setshowSupplyPositions] = useState(true);
   const [showDebtPositions, setshowDebtPositions] = useState(true);
-    const livePricesBySymbol: Record<string, number> = {
+  const livePricesBySymbol: Record<string, number> = {
     SOL: sol?.price ?? 0,
     USDT: usdt?.price ?? 0,
     USDC: usdc?.price ?? 0,
@@ -78,6 +89,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
   const [hasAnySupply, setHasAnySupply] = useState(false);
   const [netWorth, setNetWorth] = useState(0);
   const [hasAnyBorrow, setHasAnyBorrow] = useState(false);
+  const [userBorrows, setuserBorrows] = useState<any[]>([]);
 
   async function buildEnrichedMarketsForUser(walletAddress: string) {
     // turn wallet -> PublicKey
@@ -127,7 +139,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
       const totalDeposits = Number(mv.totalDepositsUi);
       const totalBorrows = Number(mv.totalBorrowsUi);
       const reserveFactor = Number(mv.reserveFactorRaw) / 10000; // assume bps
-      const locked=Number(userPos.lockedCollateralRaw)
+      const locked = Number(userPos.lockedCollateralRaw);
       const utilization = totalDeposits > 0 ? totalBorrows / totalDeposits : 0; // 0..1
 
       // aprs
@@ -143,7 +155,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
         totalSupplyUi: totalDeposits, // number
         totalBorrowUi: totalBorrows, // number
         utilizationPct: utilization * 100, // optional, handy for later
-        userLocked:locked
+        userLocked: locked,
       });
     }
 
@@ -166,25 +178,129 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
       const anySupply = rows.some((r) => (r.userSupplyUsd ?? 0) > 0);
       setHasAnySupply(anySupply);
       const suppliedTotal = rows.reduce((acc, r) => {
-              const livePx = livePricesBySymbol[r.name];
-          if (livePx === undefined || livePx === null) return acc;
-          return acc + (r.userSupplyUsd)
-        },0
-      );
+        const livePx = livePricesBySymbol[r.name];
+        if (livePx === undefined || livePx === null) return acc;
+        return acc + r.userSupplyUsd;
+      }, 0);
       setNetWorth(suppliedTotal / 10 ** 9);
     })();
   }, [primaryWallet]);
 
-    const totalSupply = useMemo(() => {
-      return marketRows.reduce((acc, row) => {
-        const livePx = livePricesBySymbol[row.name];
-        if (livePx === undefined || livePx === null) return acc;
-        return acc + (row.userSupplyUsd/ 10 ** 9 * livePx);
-      }, 0);
-    }, [marketRows, livePricesBySymbol]);
+  useEffect(() => {
+    if (
+      primaryWallet &&
+      isSolanaWallet(primaryWallet) &&
+      primaryWallet.address
+    ) {
+      try {
+        setPubkey(new PublicKey(primaryWallet.address));
+      } catch {
+        setPubkey(null);
+      }
+    } else {
+      setPubkey(null);
+    }
+  }, [primaryWallet]);
 
-    console.log(marketRows,'rows')
+  type HydratedLoan = ReturnType<typeof decodeLoanAccount> & {
+    borrowMintPk?: PublicKey;
+    collateralMintPk?: PublicKey;
+    borrowSymbol?: string;
+    collateralSymbol?: string;
+  };
 
+  // optional: your own symbol map
+  const MINT_SYMBOLS: Record<string, string> = {
+    // add what you use
+    // SOL/wSOL:xx
+    AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf: "SOL",
+    // USDC:
+    qZRfe9iy2zNhUnLK9FPDh2bxF7g5vDx3FcyXb4Di72Q: "USDC",
+    // USDT:
+    Es9vMFrzaCERt8r4wG9Z8GkZuzvjWcB1kGJrZ6iTnN9o: "USDT",
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) return;
+
+      const connection = getConnection();
+      const loans = await fetchAllLoansForUser({
+        connection,
+        borrower: pubkey,
+      });
+      if (!loans.length) {
+        setuserBorrows([]); // keep your existing state
+        return;
+      }
+
+      // cache to avoid duplicate RPC calls
+      const mintCache = new Map<string, PublicKey>();
+
+      const withMints: HydratedLoan[] = await Promise.all(
+        loans.map(async (loan) => {
+          const keyCol = loan.collateralMarket.toBase58();
+          const keyBor = loan.borrowMarket.toBase58();
+
+          const [collMint, borMint] = await Promise.all([
+            mintCache.get(keyCol) ??
+              fetchMarketMint(connection, loan.collateralMarket).then((m) => {
+                mintCache.set(keyCol, m);
+                return m;
+              }),
+            mintCache.get(keyBor) ??
+              fetchMarketMint(connection, loan.borrowMarket).then((m) => {
+                mintCache.set(keyBor, m);
+                return m;
+              }),
+          ]);
+
+          const colMintStr = collMint.toBase58();
+          const borMintStr = borMint.toBase58();
+          
+
+          return {
+            ...loan,
+            collateralMintPk: collMint,
+            borrowMintPk: borMint,
+            collateralSymbol:
+              MINT_SYMBOLS[colMintStr] ??
+              colMintStr.slice(0, 4) + "…" + colMintStr.slice(-4),
+            borrowSymbol:
+              MINT_SYMBOLS[borMintStr] ??
+              borMintStr.slice(0, 4) + "…" + borMintStr.slice(-4),
+          };
+        })
+      );
+
+      if (!cancelled) setuserBorrows(withMints);
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey]);
+
+  const totalSupply = useMemo(() => {
+    return marketRows.reduce((acc, row) => {
+      const livePx = livePricesBySymbol[row.name];
+      if (livePx === undefined || livePx === null) return acc;
+      return acc + (row.userSupplyUsd / 10 ** getDecimalsBySymbol(row.name)) * livePx;
+    }, 0);
+  }, [marketRows, livePricesBySymbol]);
+
+    const totalBorrow = useMemo(() => {
+    return userBorrows.reduce((acc, row) => {
+      const livePx = livePricesBySymbol[row.borrowSymbol];
+      if (livePx === undefined || livePx === null) return acc;
+      return acc + (row.borrowedAmountUi / 10 ** getDecimalsBySymbol(row.borrowSymbol)) * livePx;
+    }, 0);
+  }, [marketRows, livePricesBySymbol]);
+
+  console.log(marketRows, userBorrows, "rows");
 
   return (
     <div className="w-[96%] ml-[2%] min-h-screen bg-[#181818] text-white rounded-md">
@@ -208,7 +324,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                 </svg>
               }
               title="Net Worth"
-              value={`$${totalSupply.toFixed(4)}`}
+              value={`$${numberFormatter(totalSupply)}`}
               highlight={undefined}
             />
             <KpiCard
@@ -227,7 +343,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                 </svg>
               }
               title="Yielding positions"
-              value={`$${totalSupply.toFixed(4)}`}
+              value={`$${numberFormatter(totalSupply)}`}
               highlight={undefined}
             />
             <KpiCard
@@ -280,7 +396,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                       </svg>
                     }
                     title="Net Worth"
-                    value={`$${totalSupply.toFixed(4)}`}
+                    value={`$${numberFormatter(totalSupply)}`}
                     highlight={undefined}
                   />
                   <KpiCard
@@ -299,7 +415,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                       </svg>
                     }
                     title="Yielding positions"
-                    value={`$${totalSupply.toFixed(4)}`}
+                    value={`$${numberFormatter(totalSupply)}`}
                     highlight={undefined}
                   />
                   <KpiCard
@@ -336,7 +452,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                       </h2>
                       <div className="flex gap-4 items-center">
                         <div className="text-sm font-medium text-white">
-                          ${totalSupply.toFixed(4)}
+                          ${numberFormatter(totalSupply)}
                         </div>
                         <button
                           className="rounded-lg p-1 hover:bg-gray-100 transition cursor-pointer"
@@ -394,18 +510,30 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
 
                               {/* Amount */}
                               <div className="text-right text-gray-300">
-                                {r.userSupplyUsd / 10 ** 9}
+                                {numberFormatter(
+                                  r.userSupplyUsd /
+                                    10 ** getDecimalsBySymbol(r.name)
+                                )}
                               </div>
 
                               {/* Value */}
                               <div className="text-right text-gray-300">
                                 $
-                                {((r.userSupplyUsd / 10 ** 9) * livePricesBySymbol[r.name]).toFixed(4)}
+                                {numberFormatter(
+                                  (r.userSupplyUsd /
+                                    10 ** getDecimalsBySymbol(r.name)) *
+                                    livePricesBySymbol[r.name]
+                                )}
                               </div>
 
                               {/* Locked */}
                               <div className="text-right text-gray-300">
-                                ${((r.userLocked / 10 ** 9)).toFixed(4)}
+                                $
+                                {numberFormatter(
+                                  (r.userLocked /
+                                    10 ** getDecimalsBySymbol(r.name))*
+                                    livePricesBySymbol[r.name]
+                                )}
                               </div>
 
                               {/* APR */}
@@ -462,7 +590,7 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                       </h2>
                       <div className="flex gap-4 items-center">
                         <div className="text-sm font-medium text-white">
-                          ${merged.lendBorrow.total.toFixed(2)}
+                          ${numberFormatter(totalBorrow)}
                         </div>
                         <button
                           className="rounded-lg p-1 hover:bg-gray-100 transition cursor-pointer"
@@ -485,116 +613,142 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
                       <div className="p-5">
                         {/* Header row */}
                         <div className="grid grid-cols-8 text-xs font-medium text-gray-400 px-3 pb-2">
-                          <div className="">Assets</div>
+                          <div className="">Borrowed</div>
                           <div className="text-right">Value</div>
                           <div className="text-right"></div> {/* Repay */}
-                          <div className="text-right"></div> {/* Spend */}
+                          {/* <div className="text-right"></div> */}
                           <div className="text-right">APR</div>
                           <div className="text-right">Collateral</div>
+                          <div className="text-right">Value</div>
                           <div className="text-right">Health</div>
                           <div className="text-right"></div> {/* Add Col. */}
                         </div>
 
                         <div className="divide-y divide-[#232322]">
-                          {merged.lendBorrow.rows.map(
-                            (
-                              r: {
-                                market: React.ReactNode;
-                                assets: number; // treating this as "Value" here
-                                debt: number;
-                                apr?: number;
-                                collateral?: string;
-                                health?: number;
-                              },
-                              index: number
-                            ) => (
-                              <div
-                                key={index}
-                                className="grid grid-cols-8 items-center px-3 py-3 text-sm hover:bg-[#1F1F1F] transition"
-                              >
-                                {/* Assets */}
-                                <div className="flex items-center gap-3">
-                                  <span className="inline-flex h-3 w-3 rounded-full bg-emerald-500 ring-1 ring-emerald-400" />
-                                  <span className="font-medium text-white">
-                                    {r.market}
-                                  </span>
-                                </div>
-
-                                {/* Value */}
-                                <div className="text-right text-gray-300">
-                                  ${r.assets.toFixed(2)}
-                                </div>
-
-                                {/* Repay button */}
-                                <div className="flex justify-end">
-                                  <Button
-                                    className="bg-transparent text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
-                                    onClick={() =>
-                                      setActionPanel({
-                                        type: "repay",
-                                        asset: String(r.market),
-                                        mintAddress: "",
-                                      })
+                          {userBorrows.filter((loan)=>loan.statusU8!==1).map((loan, index: number) => (
+                            <div
+                              key={index}
+                              className="grid grid-cols-8 items-center px-3 py-3 text-sm hover:bg-[#1F1F1F] transition"
+                            >
+                              {/* Assets */}
+                              <div className="flex items-center gap-3">
+                                {getTokenIcon(loan.borrowSymbol as string) && (
+                                  <Image
+                                    src={
+                                      getTokenIcon(
+                                        loan.borrowSymbol as string
+                                      ) as any
                                     }
-                                  >
-                                    Repay
-                                  </Button>
-                                </div>
-
-                                {/* Spend button */}
-                                <div className="flex justify-end">
-                                  <Button
-                                    className="bg-[#0D0D0D] text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
-                                    onClick={() =>
-                                      setActionPanel({
-                                        type: "spend",
-                                        asset: String(r.market),
-                                        mintAddress: "",
-                                      })
-                                    }
-                                  >
-                                    Spend
-                                  </Button>
-                                </div>
-
-                                {/* APR */}
-                                <div className="text-right text-gray-300">
-                                  {r.apr ? `${r.apr.toFixed(2)}%` : "0.00%"}
-                                </div>
-
-                                {/* Collateral */}
-                                <div className="text-right text-gray-300 flex items-center justify-end gap-2">
-                                  <span className="inline-flex h-3 w-3 rounded-full bg-emerald-500 ring-1 ring-emerald-400" />
-                                  <span className="font-medium text-white">
-                                    {r.collateral ?? r.market}
-                                  </span>
-                                </div>
-
-                                {/* Health */}
-                                <div className="text-right text-gray-300">
-                                  {r.health
-                                    ? `${r.health.toFixed(2)}%`
-                                    : "0.00%"}
-                                </div>
-
-                                {/* Add Col. button */}
-                                <div className="flex justify-end">
-                                  <Button
-                                    className="bg-[#0D0D0D] text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
-                                    onClick={() =>
-                                      setActionPanel({
-                                        type: "addCollateral",
-                                        asset: String(r.market),
-                                        mintAddress: "",
-                                      })
-                                    }
-                                  >
-                                    Add Col.
-                                  </Button>
-                                </div>
+                                    alt="logo"
+                                    height={18}
+                                    width={18}
+                                  />
+                                )}
+                                <span className="font-medium text-white">
+                                  {loan.borrowSymbol}
+                                </span>
                               </div>
-                            )
-                          )}
+
+                              {/* Value */}
+                              <div className="text-right text-gray-300">
+                                ${numberFormatter(
+                                  (Number(loan.borrowedAmountUi) /
+                                    10 ** getDecimalsBySymbol(loan.borrowSymbol))*
+                                    (livePricesBySymbol[loan.borrowSymbol]?livePricesBySymbol[loan.borrowSymbol]:1)
+                                )}
+                              </div>
+
+                              {/* Repay button */}
+                              <div className="flex justify-end">
+                                <Button
+                                  className="bg-transparent text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
+                                  onClick={() =>
+                                    setActionPanel({
+                                      type: "repay",
+                                      asset: loan.collateralSymbol,
+                                      mintAddress: getMintBySymbol(loan.collateralSymbol),
+                                    })
+                                  }
+                                >
+                                  Repay
+                                </Button>
+                              </div>
+
+                              {/* Spend button */}
+                              {/* <div className="flex justify-end">
+                                <Button
+                                  className="bg-[#0D0D0D] text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
+                                  onClick={() =>
+                                    setActionPanel({
+                                      type: "spend",
+                                      asset: String(
+                                        loan.collateralMarket.toBase58()
+                                      ),
+                                      mintAddress: "",
+                                    })
+                                  }
+                                >
+                                  Spend
+                                </Button>
+                              </div> */}
+
+                              {/* APR */}
+                              <div className="text-right text-gray-300">
+                                2%
+                              </div>
+
+                              {/* Collateral */}
+                              <div className="text-right text-gray-300 flex items-center justify-end gap-2">
+                                {getTokenIcon(
+                                  loan.collateralSymbol as string
+                                ) && (
+                                  <Image
+                                    src={
+                                      getTokenIcon(
+                                        loan.collateralSymbol as string
+                                      ) as any
+                                    }
+                                    alt="logo"
+                                    height={18}
+                                    width={18}
+                                  />
+                                )}
+                                <span className="font-medium text-white">
+                                  {loan.collateralSymbol}
+                                </span>
+                              </div>
+
+                              <div className="text-right text-gray-300">
+                                ${numberFormatter(
+                                  (Number(loan.collateralAmountUi) /
+                                    10 ** getDecimalsBySymbol(loan.collateralSymbol))*
+                                    (livePricesBySymbol[loan.collateralSymbol]?livePricesBySymbol[loan.collateralSymbol]:1)
+                                )}
+                              </div>
+
+                              {/* Health */}
+                              <div className="text-right text-gray-300">
+                                100%
+                              </div>
+
+                              {/* Add Col. button */}
+                              <div className="flex justify-end">
+                                <Button
+                                  className="bg-[#0D0D0D] text-white border border-[#222222] h-8 px-3 text-xs font-medium"
+                                  onClick={() =>
+                                    setActionPanel({
+                                      type: "addCollateral",
+                                      asset: loan.collateralSymbol,
+                                      mintAddress: "",
+                                    })
+                                  }
+                                  disabled={true}
+                                >
+                                  Spend
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -668,7 +822,11 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
               )}
               {actionPanel && (
                 <div className="space-y-6">
-                  <DevnetWalletPanel solValue={sol} usdcValue={usdc} usdtValue={usdt} />
+                  <DevnetWalletPanel
+                    solValue={sol}
+                    usdcValue={usdc}
+                    usdtValue={usdt}
+                  />
                 </div>
               )}
             </div>
@@ -677,7 +835,13 @@ export default function HomeScreenDashboard({ data }: { data: any }) {
           {/* RIGHT SIDE */}
           <div className="w-[35%] space-y-6 transition-all">
             {/* Default: wallet on right */}
-            {!actionPanel && <DevnetWalletPanel solValue={sol} usdcValue={usdc} usdtValue={usdt} />}
+            {!actionPanel && (
+              <DevnetWalletPanel
+                solValue={sol}
+                usdcValue={usdc}
+                usdtValue={usdt}
+              />
+            )}
 
             {/* Action mode: show the action drawer */}
             {actionPanel && (

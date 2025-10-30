@@ -6,9 +6,10 @@ import {
   Connection,
   Keypair,
 } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Program, AnchorProvider, BN, Idl, Wallet } from "@coral-xyz/anchor";
 import coreRouterIdl from "../../blockchain/idl/core_router.json"; // <- paste that JSON there
+import { bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
 export const PROGRAM_ID = new PublicKey(
   "FRZjMjpFPrSCeFQSEeN9DPmTd4Ny4nTpByrNvcFTbUtQ"
 );
@@ -19,6 +20,12 @@ const CUSTOM_TOKEN_PROGRAM_ID = new PublicKey(
     11,90,19,153,218,255,16,132,4,142,123,216,219,233,248,89,
   ])
 );
+
+const DISCRIMINATOR = {
+  Loan: Buffer.from([20, 195, 70, 117, 165, 227, 182, 1]),
+  // Market: [219, 190, 213, 55, 0, 227, 198, 154], // not needed here
+  // UserPosition: [251, 248, 209, 245, 83, 234, 17, 27], // not needed here
+};
 
 const DEPOSIT_DISCRIMINATOR = Buffer.from([
   242, 35, 198, 137, 82, 225, 242, 182,
@@ -31,6 +38,27 @@ const WITHDRAW_DISCRIMINATOR = Buffer.from([
 const BORROW_DISCRIMINATOR = Buffer.from([
   228, 253, 131, 202, 207, 116, 89, 18,
 ]);
+
+const LOAN_DISCRIMINATOR = Buffer.from([20, 195, 70, 117, 165, 227, 182, 1]);
+
+const REPAY_DISCRIMINATOR = Buffer.from([234, 103, 67, 82, 208, 234, 219, 166]);
+
+const MARKET_DISCRIMINATOR = Buffer.from([219,190,213,55,0,227,198,154]); // from IDL
+
+const MARKET_MINT_OFFSET = 8; // first field after 8-byte discriminator
+
+export async function fetchMarketMint(
+  connection: Connection,
+  marketPda: PublicKey
+): Promise<PublicKey> {
+  const info = await connection.getAccountInfo(marketPda, "confirmed");
+  if (!info?.data) throw new Error("Market account not found");
+  const data = Buffer.from(info.data);
+  if (!data.slice(0, 8).equals(MARKET_DISCRIMINATOR)) {
+    throw new Error("Not a Market account");
+  }
+  return new PublicKey(data.slice(MARKET_MINT_OFFSET, MARKET_MINT_OFFSET + 32));
+}
 
 // get protocol-custodied token amount (ui + raw)
 export async function fetchProtocolHeldTokenBalance({
@@ -401,6 +429,128 @@ export async function buildBorrowTx({
   };
 }
 
+export async function buildRepayTx({
+  borrower,
+  collateralMint,
+  borrowMint,
+  repayAmountUi,
+  borrowMintDecimals,
+}: {
+  borrower: PublicKey;
+  collateralMint: PublicKey;
+  borrowMint: PublicKey;
+  repayAmountUi: number;
+  borrowMintDecimals: number;
+}) {
+  //
+  // Derive PDAs exactly per IDL
+  //
+  const [collateralMarketPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("market"), collateralMint.toBuffer()],
+    PROGRAM_ID
+  );
+
+  const [borrowMarketPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("market"), borrowMint.toBuffer()],
+    PROGRAM_ID
+  );
+
+  const [loanPda] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("loan"),
+      collateralMarketPda.toBuffer(),
+      borrowMarketPda.toBuffer(),
+      borrower.toBuffer(),
+    ],
+    PROGRAM_ID
+  );
+
+  const [userPositionPda] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("user_account"),
+      borrower.toBuffer(),
+      collateralMarketPda.toBuffer(),
+    ],
+    PROGRAM_ID
+  );
+
+  const [supplyVaultPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("supply_vault"), borrowMarketPda.toBuffer()],
+    PROGRAM_ID
+  );
+
+  // ATA for the borrow *underlying* mint (as per IDL: seeds use borrow_market.mint)
+  const userTokenAccount = getAssociatedTokenAddressSync(
+    borrowMint,
+    borrower,
+    false,
+    TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+
+  //
+  // Encode args: repay_amount (u64 LE)
+  //
+  const repayAmountBn = uiAmountToBaseUnits(repayAmountUi, borrowMintDecimals);
+  const data = Buffer.concat([REPAY_DISCRIMINATOR, u64Le(repayAmountBn)]);
+
+  //
+  // Accounts in exact IDL order
+  //
+  const keys = [
+    // borrower (signer)
+    { pubkey: borrower, isSigner: true, isWritable: true },
+
+    // mint (borrow underlying mint)
+    { pubkey: borrowMint, isSigner: false, isWritable: false },
+
+    // loan
+    { pubkey: loanPda, isSigner: false, isWritable: true },
+
+    // collateral_market
+    { pubkey: collateralMarketPda, isSigner: false, isWritable: true },
+
+    // borrow_market
+    { pubkey: borrowMarketPda, isSigner: false, isWritable: true },
+
+    // user_position (PDA over borrower + collateral_market)
+    { pubkey: userPositionPda, isSigner: false, isWritable: true },
+
+    // user_token_account (ATA for borrower & borrow_market.mint)
+    { pubkey: userTokenAccount, isSigner: false, isWritable: true },
+
+    // supply_vault (for borrow_market)
+    { pubkey: supplyVaultPda, isSigner: false, isWritable: true },
+
+    // token_program
+    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+
+    // associated_token_program
+    { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+
+    // system_program
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+
+  const ix = new TransactionInstruction({
+    keys,
+    programId: PROGRAM_ID,
+    data,
+  });
+
+  return {
+    ix,
+    derived: {
+      collateralMarketPda,
+      borrowMarketPda,
+      loanPda,
+      userPositionPda,
+      userTokenAccount,
+      supplyVaultPda,
+    },
+  };
+}
+
 const CORE_PROGRAM_ERRORS: Record<number, string> = {
   6000: "depositTooSmall: Deposit amount below minimum threshold",
   6001: "depositTooLarge: Deposit amount exceeds maximum allowed",
@@ -474,6 +624,12 @@ function readU128LE(buf: Buffer, offset: number): bigint {
   }
   return x;
 }
+
+const toUiNumber = (v: bigint) => {
+  const n = Number(v);
+  // If it overflows JS safe integer, return NaN to signal caller to handle formatting
+  return Number.isSafeInteger(n) ? n : NaN;
+};
 
 // derive market PDA: seeds = ["market", marketMint]
 function deriveMarketPda(marketMint: PublicKey): PublicKey {
@@ -589,6 +745,216 @@ export async function fetchUserPositionViewRawWeb3(args: {
     borrowSharesUi,
     initialized: true,
   };
+}
+
+export function deriveLoanPda(
+  collateralMarketPda: PublicKey,
+  borrowMarketPda: PublicKey,
+  borrower: PublicKey
+): [PublicKey, number] {
+  const [pda, bump] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("loan"),
+      collateralMarketPda.toBuffer(),
+      borrowMarketPda.toBuffer(),
+      borrower.toBuffer(),
+    ],
+    PROGRAM_ID
+  );
+  return [pda, bump];
+}
+
+/** Types for decoded Loan view */
+export type LoanView = {
+  pda: PublicKey;
+
+  borrower: PublicKey;
+  loanId: bigint;
+
+  collateralMarket: PublicKey;
+  collateralAmountRaw: bigint;
+
+  borrowMarket: PublicKey;
+  borrowedAmountRaw: bigint;       // shares? (per your IDL it's u64)
+  borrowedUnderlyingRaw: bigint;   // u64 underlying
+
+  userPositionAccount: PublicKey;
+
+  currentMarket: PublicKey;
+  currentPositionValueRaw: bigint;
+
+  l3Integration: PublicKey;
+  l3SharesReceivedRaw: bigint;
+
+  currentSpentU8: number;
+  statusU8: number;
+
+  createdAt: bigint; // i64 (seconds)
+  updatedAt: bigint; // i64 (seconds)
+
+  bump: number;
+
+  // UI helpers (may be NaN if too large)
+  collateralAmountUi: number;
+  borrowedAmountUi: number;
+  borrowedUnderlyingUi: number;
+  currentPositionValueUi: number;
+  l3SharesReceivedUi: number;
+};
+
+/** Fixed layout (byte offsets) for Loan account (including discriminator at 0..8) */
+const LOAN_LAYOUT = {
+  size: 267, // total bytes including 8-byte discriminator
+  // offsets after the 8-byte discriminator:
+  borrower: 8,                  // 32
+  loan_id: 40,                  // 8
+  collateral_market: 48,        // 32
+  collateral_amount: 80,        // 8
+  borrow_market: 88,            // 32
+  borrowed_amount: 120,         // 8
+  borrowed_underlying: 128,     // 8
+  user_position_account: 136,   // 32
+  current_market: 168,          // 32
+  current_position_value: 200,  // 8
+  l3_integration: 208,          // 32
+  l3_shares_received: 240,      // 8
+  current_spent_u8: 248,        // 1
+  status_u8: 249,               // 1
+  created_at: 250,              // 8 (i64)
+  updated_at: 258,              // 8 (i64)
+  bump: 266,                    // 1
+};
+
+/** Decode a Loan account Buffer into a LoanView */
+export function decodeLoanAccount(pda: PublicKey, data: Buffer): LoanView {
+  // Basic guard
+  if (data.length < LOAN_LAYOUT.size) {
+    throw new Error(`Loan account too small: got ${data.length}, expected >= ${LOAN_LAYOUT.size}`);
+  }
+  // Optional discriminator check
+  const disc = data.slice(0, 8);
+  if (!disc.equals(DISCRIMINATOR.Loan)) {
+    throw new Error(`Invalid Loan discriminator`);
+  }
+
+  const borrower = new PublicKey(data.slice(LOAN_LAYOUT.borrower, LOAN_LAYOUT.borrower + 32));
+  const loanId = readU64LE(data, LOAN_LAYOUT.loan_id);
+
+  const collateralMarket = new PublicKey(data.slice(LOAN_LAYOUT.collateral_market, LOAN_LAYOUT.collateral_market + 32));
+  const collateralAmountRaw = readU64LE(data, LOAN_LAYOUT.collateral_amount);
+
+  const borrowMarket = new PublicKey(data.slice(LOAN_LAYOUT.borrow_market, LOAN_LAYOUT.borrow_market + 32));
+  const borrowedAmountRaw = readU64LE(data, LOAN_LAYOUT.borrowed_amount);
+  const borrowedUnderlyingRaw = readU64LE(data, LOAN_LAYOUT.borrowed_underlying);
+
+  const userPositionAccount = new PublicKey(data.slice(LOAN_LAYOUT.user_position_account, LOAN_LAYOUT.user_position_account + 32));
+
+  const currentMarket = new PublicKey(data.slice(LOAN_LAYOUT.current_market, LOAN_LAYOUT.current_market + 32));
+  const currentPositionValueRaw = readU64LE(data, LOAN_LAYOUT.current_position_value);
+
+  const l3Integration = new PublicKey(data.slice(LOAN_LAYOUT.l3_integration, LOAN_LAYOUT.l3_integration + 32));
+  const l3SharesReceivedRaw = readU64LE(data, LOAN_LAYOUT.l3_shares_received);
+
+  const currentSpentU8 = data[LOAN_LAYOUT.current_spent_u8];
+  const statusU8 = data[LOAN_LAYOUT.status_u8];
+
+  const createdAt = readI64LE(data, LOAN_LAYOUT.created_at);
+  const updatedAt = readI64LE(data, LOAN_LAYOUT.updated_at);
+
+  const bump = data[LOAN_LAYOUT.bump];
+
+  return {
+    pda,
+
+    borrower,
+    loanId,
+
+    collateralMarket,
+    collateralAmountRaw,
+
+    borrowMarket,
+    borrowedAmountRaw,
+    borrowedUnderlyingRaw,
+
+    userPositionAccount,
+
+    currentMarket,
+    currentPositionValueRaw,
+
+    l3Integration,
+    l3SharesReceivedRaw,
+
+    currentSpentU8,
+    statusU8,
+
+    createdAt,
+    updatedAt,
+
+    bump,
+
+    // UI helpers
+    collateralAmountUi: toUiNumber(collateralAmountRaw),
+    borrowedAmountUi: toUiNumber(borrowedAmountRaw),
+    borrowedUnderlyingUi: toUiNumber(borrowedUnderlyingRaw),
+    currentPositionValueUi: toUiNumber(currentPositionValueRaw),
+    l3SharesReceivedUi: toUiNumber(l3SharesReceivedRaw),
+  };
+}
+
+/**
+ * Fetch a specific loan by deriving its PDA from:
+ *  - collateral_market_pda
+ *  - borrow_market_pda
+ *  - borrower pubkey
+ */
+export async function fetchLoanByMarkets(args: {
+  connection: Connection;
+  borrower: PublicKey;
+  collateralMarketPda: PublicKey;
+  borrowMarketPda: PublicKey;
+  commitment?: "processed" | "confirmed" | "finalized";
+}): Promise<LoanView | null> {
+  const {
+    connection,
+    borrower,
+    collateralMarketPda,
+    borrowMarketPda,
+    commitment = "confirmed",
+  } = args;
+
+  const [loanPda] = deriveLoanPda(collateralMarketPda, borrowMarketPda, borrower);
+  const info = await connection.getAccountInfo(loanPda, commitment);
+
+  if (!info || !info.data || info.data.length === 0) return null;
+  const data = Buffer.from(info.data);
+  return decodeLoanAccount(loanPda, data);
+}
+
+/**
+ * Fetch all loans for a borrower by scanning program accounts with memcmp.
+ * This avoids having to know all market pairs ahead of time.
+ */
+
+export async function fetchAllLoansForUser(args: {
+  connection: Connection;
+  borrower: PublicKey;
+  commitment?: "processed" | "confirmed" | "finalized";
+}) {
+  const { connection, borrower, commitment = "confirmed" } = args;
+
+  const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
+    commitment,
+    filters: [
+      // offset 0: account discriminator (BASE58!)
+      { memcmp: { offset: 0, bytes: bs58.encode(LOAN_DISCRIMINATOR) } },
+      // offset 8: borrower pubkey (already base58)
+      { memcmp: { offset: 8, bytes: borrower.toBase58() } },
+    ],
+  });
+
+  return accounts.map(({ pubkey, account }) =>
+    decodeLoanAccount(pubkey, Buffer.from(account.data))
+  );
 }
 
 

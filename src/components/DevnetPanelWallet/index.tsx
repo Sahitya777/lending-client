@@ -16,6 +16,7 @@ import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import Image from "next/image";
 import { getTokenIcon } from "@/utils/helper";
 import { PythPrice } from "@/hooks/usePrice";
+import numberFormatter from "@/utils/numberFormatter";
 
 /**
  * TokenConfig
@@ -40,12 +41,12 @@ export type TokenConfig = {
 const DEFAULT_TOKENS: TokenConfig[] = [
   {
     symbol: "SOL",
-    native: true,
+     mint: "AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf",
     usdPrice: 0.0,
   },
   {
     symbol: "USDC",
-    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    mint: "qZRfe9iy2zNhUnLK9FPDh2bxF7g5vDx3FcyXb4Di72Q",
     usdPrice: 1.0,
     programId: "token",
   },
@@ -239,10 +240,7 @@ export default function DevnetWalletPanel({
           <h2 className="text-lg font-semibold">{title}</h2>
           <div className="text-sm font-bold text-white">
             {address
-              ? `$${totalUSD.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}`
+              ? `$${numberFormatter(totalUSD)}`
               : "$0.00"}
           </div>
         </div>
@@ -305,27 +303,19 @@ export default function DevnetWalletPanel({
                     {/* USD price per token */}
                     <div className="text-right">
                       {livePx !== undefined && livePx !== null
-                        ? `$${livePx.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}`
+                        ? `$${numberFormatter(livePx)}`
                         : "—"}
                     </div>
 
                     {/* Token balance */}
                     <div className="text-right">
-                      {r.amount.toLocaleString(undefined, {
-                        maximumFractionDigits: 6,
-                      })}
+                      {numberFormatter(r.amount)}
                     </div>
 
                     {/* Total USD value for that row */}
                     <div className="text-right">
                       {rowUsdValue !== undefined
-                        ? `$${rowUsdValue.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}`
+                        ? `$${numberFormatter(rowUsdValue)}`
                         : "—"}
                     </div>
                   </div>

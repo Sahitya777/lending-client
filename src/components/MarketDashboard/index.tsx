@@ -18,6 +18,8 @@ import {
   USDT_FEED_ID,
 } from "@/constants/pricefeedids";
 import { usePythPrice } from "@/hooks/usePrice";
+import { getDecimalsBySymbol } from "@/utils/token";
+import numberFormatter from "@/utils/numberFormatter";
 
 // Static base metadata per market (icon, symbol text etc.)
 export const markets = [
@@ -32,7 +34,7 @@ export const markets = [
     tier: "Shared",
     rewards: true,
     icon: solicon,
-    mintAddress: "84iD9iK7Xpt4YgfscT6piausnWnVZ4bs5XqEFrtrZVZk",
+    mintAddress: "AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf",
   },
   {
     name: "USDC",
@@ -45,7 +47,7 @@ export const markets = [
     tier: "Shared",
     rewards: true,
     icon: usdcicon,
-    mintAddress: "84iD9iK7Xpt4YgfscT6piausnWnVZ4bs5XqEFrtrZVZk",
+    mintAddress: "qZRfe9iy2zNhUnLK9FPDh2bxF7g5vDx3FcyXb4Di72Q",
   },
   {
     name: "USDT",
@@ -58,7 +60,7 @@ export const markets = [
     tier: "Shared",
     rewards: true,
     icon: usdticon,
-    mintAddress: "84iD9iK7Xpt4YgfscT6piausnWnVZ4bs5XqEFrtrZVZk",
+    mintAddress: "AKss9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf",
   },
 ];
 
@@ -75,10 +77,10 @@ export default function MarketDashboard() {
 
   // build symbol -> live price map
   // NOTE: protect against undefined
-  const livePricesBySymbol: Record<string, number | undefined> = {
-    SOL: sol?.price ?? undefined,
-    USDT: usdt?.price ?? undefined,
-    USDC: usdc?.price ?? undefined,
+  const livePricesBySymbol: Record<string, number> = {
+    SOL: sol?.price ?? 0,
+    USDT: usdt?.price ?? 0,
+    USDC: usdc?.price ?? 0,
   };
 
   // action drawer panel
@@ -305,12 +307,12 @@ export default function MarketDashboard() {
 
                             {/* total supply */}
                             <td className="py-5 px-6 text-right text-white text-sm">
-                              {(m.totalSupplyUi / 10 ** 9)}
+                              {numberFormatter((m.totalSupplyUi / 10 ** getDecimalsBySymbol(m.name)))}
                             </td>
 
                             {/* total borrow */}
                             <td className="py-5 px-6 text-right text-white text-sm">
-                              {(m.totalBorrowUi / 10 ** 9)}
+                              {numberFormatter(m.totalBorrowUi / 10 ** (getDecimalsBySymbol(m.name)))}
                             </td>
 
                             {/* supply apy */}

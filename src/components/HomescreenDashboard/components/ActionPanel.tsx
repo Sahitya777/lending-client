@@ -1,27 +1,41 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { SpendContent } from "./SpendContent";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { isSolanaWallet } from "@dynamic-labs/solana";
-import { PublicKey, SendTransactionError, Transaction } from "@solana/web3.js";
+import {
+  PublicKey,
+  SendTransactionError,
+  Transaction,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { fetchSplTokenBalance, getConnection } from "@/utils/chain/solana";
 import {
   buildBorrowTx,
   buildDepositTx,
+  buildRepayTx,
   buildWithdrawTx,
+  fetchAllLoansForUser,
   fetchUserPositionViewRawWeb3,
 } from "@/utils/chain/helper";
 import { Button } from "@/components/ui/button";
 import { getTokenIcon } from "@/utils/helper";
 import Image from "next/image";
 import { ChevronDownIcon } from "lucide-react";
+import { PythSolanaReceiver } from "@pythnetwork/pyth-solana-receiver";
+import { HermesClient } from "@pythnetwork/hermes-client";
+import { markets } from "@/components/MarketDashboard";
+import { useToast } from "@/hooks/useToast";
+import { getDecimalsBySymbol } from "@/utils/token";
+import numberFormatter from "@/utils/numberFormatter";
 
 export function ActionPanel({
   actionPanel,
   onClose,
 }: {
-  actionPanel: { type: string; asset: string; mintAddress: string };
+  actionPanel: { type: string; asset: string; mintAddress: string,borrowAseet?:string };
   onClose: () => void;
 }) {
+  console.log(actionPanel, "act");
   const prettyTitleMap: Record<string, string> = {
     supply: "Supply",
     withdraw: "Withdraw",
@@ -56,17 +70,41 @@ export function ActionPanel({
   const borrowDraggingRef = useRef(false);
   const collateralSliderRef = useRef<HTMLDivElement | null>(null);
   const borrowSliderRef = useRef<HTMLDivElement | null>(null);
-  const marketOptions = ["USDC", "USDT", "SOL"];
+  const marketOptions = ["SOL", "USDC", "USDT"];
   const [activeTab, setActiveTab] = useState<"liquidity" | "swap">("liquidity");
   const [selectedDapp, setSelectedDapp] = useState<string>("Select Dapp");
-  const [selectedMarket, setSelectedMarket] = useState<string>("USDC");
+  const [selectedMarket, setSelectedMarket] = useState<string>(
+    actionPanel.asset
+  );
   const [selectedBorrowMarket, setSelectedBorrowMarket] =
     useState<string>("USDC");
+  const borrowMint = useMemo(() => {
+    const m = markets.find(
+      (m) => m.name.toLowerCase() === selectedBorrowMarket.toLowerCase()
+    );
+    return m?.mintAddress ?? "AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf";
+  }, [selectedBorrowMarket]);
+  const supplyMint = useMemo(() => {
+    const m = markets.find(
+      (m) => m.name.toLowerCase() === selectedMarket.toLowerCase()
+    );
+    return m?.mintAddress ?? "AKsF9fzPfmV48SmC6TxFXa4XWo1Ck6sjcF3DkWH6QXJf";
+  }, [selectedMarket]);
+  const { toast } = useToast();
+
   const [showMarketMenu, setShowMarketMenu] = useState(false);
+  const [showSupplyMarketMenu, setshowSupplyMarketMenu] = useState(false);
   const marketRef = useRef<HTMLDivElement | null>(null);
   const canDeposit = !!pubkey && amount !== 0 && Number(amount) > 0 && !busy;
-
   // ---------- TX HANDLERS (unchanged) ----------
+
+  const resetStates = () => {
+    setAmount(0);
+    setBorrowAmount(0);
+    setHealthPct(0);
+    setBorrowPct(0);
+  };
+
   const onApproveAndDeposit = async () => {
     if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
       setShowAuthFlow(true);
@@ -86,7 +124,7 @@ export function ActionPanel({
         owner: pubkey,
         mint: new PublicKey(actionPanel.mintAddress),
         amountUi: value,
-        mintDecimals: 9,
+        mintDecimals: getDecimalsBySymbol(selectedMarket),
         connection: connection as any,
       });
 
@@ -103,20 +141,27 @@ export function ActionPanel({
       const signedTx = await signer.signTransaction(freshTx as any);
 
       try {
-        const rawTx = signedTx.serialize();
-        const sig = await connection.sendRawTransaction(rawTx, {
-          skipPreflight: false,
-          maxRetries: 3,
+        const view = await fetchUserPositionViewRawWeb3({
+          owner: pubkey,
+          marketMint: new PublicKey(supplyMint),
+          connection,
+          commitment: "confirmed",
         });
-
-        setTxSig(sig);
-
         setBalance(
+          Number(view.depositedSharesUi) /
+            10 ** getDecimalsBySymbol(selectedMarket)
+        );
+        setWalletBalance(
           await fetchSplTokenBalance(
             pubkey,
             new PublicKey(actionPanel.mintAddress)
           )
         );
+        toast({
+          title: "Deposit Successfull",
+          description: `You have successfully deposited ${amount} ${selectedMarket}`,
+        });
+        resetStates();
       } catch (sendErr: any) {
         if (sendErr instanceof SendTransactionError) {
         }
@@ -148,7 +193,7 @@ export function ActionPanel({
         owner: pubkey,
         mint: new PublicKey(actionPanel.mintAddress),
         sharesUi: value,
-        shareDecimals: 9,
+        shareDecimals: getDecimalsBySymbol(selectedMarket),
       });
 
       const { blockhash, lastValidBlockHeight } =
@@ -163,6 +208,164 @@ export function ActionPanel({
       const signer = await primaryWallet.getSigner();
       const signedTx = await signer.signTransaction(freshTx as any);
 
+      try {
+        const view = await fetchUserPositionViewRawWeb3({
+          owner: pubkey,
+          marketMint: new PublicKey(supplyMint),
+          connection,
+          commitment: "confirmed",
+        });
+        setBalance(
+          Number(view.depositedSharesUi) /
+            10 ** getDecimalsBySymbol(selectedMarket)
+        );
+        setWalletBalance(
+          Number(view.depositedSharesUi) /
+            10 ** getDecimalsBySymbol(selectedMarket)
+        );
+        toast({
+          title: "Withdraw Successfull",
+          description: `You have successfully withdrawed ${amount} ${selectedMarket}`,
+        });
+        resetStates();
+      } catch (sendErr: any) {
+        if (sendErr instanceof SendTransactionError) {
+        }
+        throw sendErr;
+      }
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Withdraw Failed",
+        description: `Your withdraw has failed ${err}`,
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // app config you MUST fill with real addresses from your bootstrap script
+  const onBorrow = async () => {
+    if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
+      setShowAuthFlow(true);
+      return;
+    }
+
+    setBusy(true);
+    setTxSig("");
+
+    try {
+      const collateralVal = Number(amount);
+      const borrowVal = Number(borrowAmount);
+
+      if (collateralVal <= 0) throw new Error("Enter valid collateral");
+      if (borrowVal <= 0) throw new Error("Enter valid borrow amount");
+
+      // 1. connection
+      const connection = getConnection();
+
+      // 2. assets config
+      const collateralCfg = actionPanel.mintAddress;
+
+      const collateralMintPk = new PublicKey(collateralCfg);
+      const borrowMintPk = new PublicKey(borrowMint);
+      const signer = await primaryWallet.getSigner();
+      // 3. prep wallet adapter for PythSolanaReceiver
+      // PythSolanaReceiver expects an Anchor-style wallet with `publicKey`
+      // and signing capability. We'll proxy the connected wallet.
+      // primaryWallet.getSigner() is app-specific in your code, adjust if needed.
+
+      const anchorishWallet = {
+        publicKey: pubkey,
+        // signAllTransactions is what many Anchor-style flows call;
+        // if your signer only has signTransaction, we can lift it.
+        signAllTransactions: async (txs: VersionedTransaction[]) => {
+          const signed: VersionedTransaction[] = [];
+          for (const tx of txs) {
+            const stx = await (signer as any).signTransaction(tx); // wallet adapter compat
+            signed.push(stx);
+          }
+          return signed;
+        },
+      };
+
+      // 4. init Pyth receiver
+      const pythSolanaReceiver = new PythSolanaReceiver({
+        connection,
+        wallet: anchorishWallet as any,
+      });
+
+      const solUsdPriceFeedAccount = pythSolanaReceiver
+        .getPriceFeedAccountAddress(
+          0,
+          "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d"
+        )
+        .toBase58();
+
+      const usdtUsdPriceFeedAccount = pythSolanaReceiver
+        .getPriceFeedAccountAddress(
+          0,
+          "2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b"
+        )
+        .toBase58();
+
+      const hermes = new HermesClient("https://hermes.pyth.network/");
+      console.log(
+        "Fetching price updates from Hermes for SOL and USDT feeds..."
+      );
+      const priceUpdatePayload = (
+        await hermes.getLatestPriceUpdates(
+          [
+            "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
+            "2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b",
+          ],
+          { encoding: "base64" }
+        )
+      ).binary.data;
+
+      // For now we'll stub:
+
+      // 6. start tx builder (decide if you want rent reclaim)
+      const transactionBuilder = pythSolanaReceiver.newTransactionBuilder({
+        closeUpdateAccounts: false,
+      });
+
+      // 7. add Pyth "post price update" instructions for those feeds
+      await transactionBuilder.addPostPriceUpdates(priceUpdatePayload);
+      const freshVersionedTxs =
+        await transactionBuilder.buildVersionedTransactions({
+          computeUnitPriceMicroLamports: 50_000,
+        });
+      await pythSolanaReceiver.provider.sendAll(freshVersionedTxs, {
+        skipPreflight: true,
+      });
+
+      // 8. now add YOUR borrow instruction(s),
+      // wired with the Pyth price update accounts.
+      const { ix } = await buildBorrowTx({
+        borrower: pubkey,
+        collateralMint: collateralMintPk,
+        borrowMint: borrowMintPk,
+        sharesAmountUi: collateralVal,
+        borrowAmountUi: borrowVal,
+        collateralMintDecimals: getDecimalsBySymbol(selectedMarket),
+        borrowMintDecimals: getDecimalsBySymbol(selectedBorrowMarket),
+        priceUpdateCollateral: new PublicKey(solUsdPriceFeedAccount),
+        priceUpdateBorrow: new PublicKey(solUsdPriceFeedAccount),
+        connection: connection as any,
+      });
+
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("finalized");
+
+      const freshTx = new Transaction();
+      freshTx.add(ix);
+      freshTx.feePayer = pubkey;
+      freshTx.recentBlockhash = blockhash;
+      (freshTx as any)._lastValidBlockHeight = lastValidBlockHeight;
+
+      const signedTx = await signer.signTransaction(freshTx as any);
       try {
         const rawTx = signedTx.serialize();
         const sig = await connection.sendRawTransaction(rawTx, {
@@ -189,7 +392,6 @@ export function ActionPanel({
         );
       } catch (sendErr: any) {
         if (sendErr instanceof SendTransactionError) {
-
         }
         throw sendErr;
       }
@@ -200,82 +402,84 @@ export function ActionPanel({
     }
   };
 
-// app config you MUST fill with real addresses from your bootstrap script
-const PROTOCOL_ASSETS = {
-  COLLATERAL: {
-    mint: "REPLACE_WITH_mockMint1_base58",
-    decimals: 9,
-  },
-  BORROW: {
-    mint: "REPLACE_WITH_mockMint2_base58",
-    decimals: 6,
-  },
-};
-
-
-const onBorrow = async () => {
+  const onRepay = async () => {
   if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
     setShowAuthFlow(true);
     return;
   }
-  alert('hi')
-
 
   setBusy(true);
   setTxSig("");
 
   try {
-    const collateralVal = Number(amount);
-    const borrowVal = Number(borrowAmount);
+    const repayVal = Number(amount); // <-- your input state
+    if (!Number.isFinite(repayVal) || repayVal <= 0) {
+      throw new Error("Enter valid repay amount");
+    }
 
-    if (collateralVal <= 0) throw new Error("Enter valid collateral");
-    // if (borrowVal <= 0) throw new Error("Enter valid borrow amount");
-
+    // 1) connection
     const connection = getConnection();
 
-    // 2. pick the two assets (must match how your protocol was initialized)
-    const collateralCfg = PROTOCOL_ASSETS.COLLATERAL;
-    const borrowCfg     = PROTOCOL_ASSETS.BORROW;
+    // 2) assets / mints
+    //   - collateral mint stays the same market you borrowed against
+    //   - borrowMint is the underlying you're repaying (e.g., USDT/USDC)
+    const collateralMintPk = new PublicKey(supplyMint);
+    const borrowMintPk = new PublicKey(borrowMint);
 
-    const collateralMintPk = new PublicKey(collateralCfg.mint);
-    const borrowMintPk     = new PublicKey(borrowCfg.mint);
+    // 3) signer (adapter compat)
+    const signer = await primaryWallet.getSigner();
 
-    // 3. build your program instruction
-    const { ix } = await buildBorrowTx({
+    // 4) build repay instruction
+    const { ix } = await buildRepayTx({
       borrower: pubkey,
       collateralMint: collateralMintPk,
       borrowMint: borrowMintPk,
-      sharesAmountUi: collateralVal,
-      borrowAmountUi: borrowVal,
-      collateralMintDecimals: collateralCfg.decimals,
-      borrowMintDecimals: borrowCfg.decimals,
-      priceUpdateCollateral: new PublicKey(''),
-      priceUpdateBorrow: new PublicKey(''),
-      connection: connection as any,
+      repayAmountUi: repayVal,
+      borrowMintDecimals: getDecimalsBySymbol(selectedBorrowMarket),
     });
 
-    // 4. standard tx build / sign / send
+    // 5) assemble & send
     const { blockhash, lastValidBlockHeight } =
       await connection.getLatestBlockhash("finalized");
 
-    const freshTx = new Transaction();
-    freshTx.add(ix);
-    freshTx.feePayer = pubkey;
-    freshTx.recentBlockhash = blockhash;
-    (freshTx as any)._lastValidBlockHeight = lastValidBlockHeight;
+    const tx = new Transaction();
+    tx.add(ix);
+    tx.feePayer = pubkey;
+    tx.recentBlockhash = blockhash;
+    (tx as any)._lastValidBlockHeight = lastValidBlockHeight;
 
-    const signer = await primaryWallet.getSigner();
-    const signedTx = await signer.signTransaction(freshTx as any);
+    const signedTx = await signer.signTransaction(tx as any);
 
     try {
-      const rawTx = signedTx.serialize();
-      const sig = await connection.sendRawTransaction(rawTx, {
+      const raw = signedTx.serialize();
+      const sig = await connection.sendRawTransaction(raw, {
         skipPreflight: false,
         maxRetries: 3,
       });
 
       setTxSig(sig);
+
+      await connection.confirmTransaction(
+        {
+          signature: sig,
+          blockhash: tx.recentBlockhash!,
+          lastValidBlockHeight,
+        },
+        "confirmed"
+      );
+
+      // 6) refresh balances / positions as you already do
+      setBalance(
+        await fetchSplTokenBalance(pubkey, new PublicKey(actionPanel.mintAddress))
+      );
+      // optional: refresh borrow-token balance too
+      // setBorrowTokenBalance(await fetchSplTokenBalance(pubkey, borrowMintPk));
+      // optional: refresh user loans list
+      // setUserLoans(await fetchAllLoansForUser({ connection, borrower: pubkey }));
     } catch (sendErr: any) {
+      if (sendErr instanceof SendTransactionError) {
+        // handle UI-specific error formatting if you want
+      }
       throw sendErr;
     }
   } catch (err) {
@@ -284,9 +488,6 @@ const onBorrow = async () => {
     setBusy(false);
   }
 };
-
-
-
 
   // ---------- wallet / balances ----------
   useEffect(() => {
@@ -316,27 +517,30 @@ const onBorrow = async () => {
         return;
       }
       try {
-        const bal = await fetchSplTokenBalance(
-          pubkey,
-          new PublicKey(actionPanel.mintAddress)
-        );
-        setWalletBalance(bal);
+        if (actionPanel.type === "withdraw") {
+        } else {
+          const bal = await fetchSplTokenBalance(
+            pubkey,
+            new PublicKey(supplyMint)
+          );
+          setWalletBalance(bal);
 
-        // keep collateral amount clamped
-        setAmount((prev) => {
-          const clamped = Math.min(Math.max(prev, 0), bal || 0);
-          const pct = bal > 0 ? (clamped / bal) * 100 : 0;
-          setHealthPct(pct);
-          return clamped;
-        });
+          // keep collateral amount clamped
+          setAmount((prev) => {
+            const clamped = Math.min(Math.max(prev, 0), bal || 0);
+            const pct = bal > 0 ? (clamped / bal) * 100 : 0;
+            setHealthPct(pct);
+            return clamped;
+          });
 
-        // keep borrow amount clamped
-        setBorrowAmount((prev) => {
-          const clamped = Math.min(Math.max(prev, 0), bal || 0);
-          const pct = bal > 0 ? (clamped / bal) * 100 : 0;
-          setBorrowPct(pct);
-          return clamped;
-        });
+          // keep borrow amount clamped
+          setBorrowAmount((prev) => {
+            const clamped = Math.min(Math.max(prev, 0), bal || 0);
+            const pct = bal > 0 ? (clamped / bal) * 100 : 0;
+            setBorrowPct(pct);
+            return clamped;
+          });
+        }
       } catch {
         setWalletBalance(0);
         setAmount(0);
@@ -345,7 +549,7 @@ const onBorrow = async () => {
         setBorrowPct(0);
       }
     })();
-  }, [pubkey, primaryWallet, actionPanel.mintAddress]);
+  }, [pubkey, primaryWallet, supplyMint]);
 
   useEffect(() => {
     (async () => {
@@ -354,16 +558,25 @@ const onBorrow = async () => {
 
       const view = await fetchUserPositionViewRawWeb3({
         owner: pubkey,
-        marketMint: new PublicKey(actionPanel.mintAddress),
+        marketMint: new PublicKey(supplyMint),
         connection,
         commitment: "confirmed",
       });
 
       if (view) {
-        setBalance(Number(view.depositedSharesUi) / 10 ** 9);
+        setBalance(
+          Number(view.depositedSharesUi) /
+            10 ** getDecimalsBySymbol(selectedMarket)
+        );
+        if (actionPanel.type === "withdraw") {
+          setWalletBalance(
+            Number(view.depositedSharesUi) /
+              10 ** getDecimalsBySymbol(selectedMarket)
+          );
+        }
       }
     })();
-  }, [pubkey, actionPanel.mintAddress]);
+  }, [pubkey, supplyMint, actionPanel.type]);
 
   // ---------- helpers: collateral slider <-> amount ----------
   const updateFromPct = useCallback(
@@ -526,7 +739,7 @@ const onBorrow = async () => {
   const projectedHealth = (1.5 + (healthPct / 100) * 1.0).toFixed(2);
 
   return (
-    <div className="rounded-2xl border border-[#232322] shadow-sm text-white">
+    <div className="rounded-md border border-[#232322] shadow-sm text-white">
       {/* Header */}
       <div className="flex items-start justify-between p-5 border-b border-[#2a2a2a]">
         <div>
@@ -534,10 +747,10 @@ const onBorrow = async () => {
             {heading}
           </div>
           <div className="text-lg font-semibold text-white flex items-center gap-2">
-            {heading} {actionPanel.asset}
+            {heading} {selectedMarket}
           </div>
           <div className="text-[11px] text-gray-500 mt-1">
-            Supplied balance: {balance} {actionPanel.asset}
+            Supplied balance: {numberFormatter(balance)} {selectedMarket}
           </div>
         </div>
 
@@ -567,6 +780,85 @@ const onBorrow = async () => {
           <>
             {/* Collateral / Amount */}
             <div className="space-y-2 border border-[#27272A] rounded-md p-4">
+              <div
+                className="rounded-xl border border-[#2a2a2a] bg-[#1A1A1A] p-4 text-left w-full relative"
+                ref={marketRef}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    {/* token icon */}
+                    {getTokenIcon(selectedMarket as string) && (
+                      <Image
+                        src={getTokenIcon(selectedMarket as string) as any}
+                        alt="logo"
+                        height={34}
+                        width={34}
+                      />
+                    )}
+                    <div>
+                      <div className="text-[14px] text-gray-400 font-medium">
+                        Select Market
+                      </div>
+                      <div className="text-[16px] text-gray-300 font-semibold leading-tight flex items-center gap-2">
+                        {selectedMarket}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    className="border border-[#2a2a2a] bg-transparent rounded-md h-8 w-8 flex items-center justify-center cursor-pointer hover:bg-[#2a2a2a] transition"
+                    onClick={() => {
+                      // toggle this dropdown, close the other
+                      setshowSupplyMarketMenu((open) => !open);
+                    }}
+                  >
+                    <ChevronDownIcon
+                      className={`h-4 w-4 text-white transition-transform ${
+                        showMarketMenu ? "rotate-180" : "rotate-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* dropdown menu for market */}
+                {showSupplyMarketMenu && (
+                  <div className="absolute left-0 top-full mt-2 w-full rounded-lg border border-[#2a2a2a] bg-[#1E1F1E] shadow-xl z-50 overflow-hidden">
+                    {marketOptions.map((opt: string) => (
+                      <button
+                        key={opt}
+                        className={`w-full text-left px-4 py-3 text-[13px] cursor-pointer flex justify-between items-center hover:bg-[#2a2a2a] ${
+                          selectedMarket === opt
+                            ? "text-white font-semibold"
+                            : "text-gray-300"
+                        }`}
+                        onClick={() => {
+                          setSelectedMarket(opt);
+                          setshowSupplyMarketMenu(false);
+                        }}
+                      >
+                        <span className="flex items-center gap-2">
+                          {/* token circle */}
+                          {getTokenIcon(opt as string) && (
+                            <Image
+                              src={getTokenIcon(opt as string) as any}
+                              alt="logo"
+                              height={18}
+                              width={18}
+                            />
+                          )}
+                          <span>{opt}</span>
+                        </span>
+
+                        {selectedMarket === opt && (
+                          <span className="text-[11px] text-emerald-400 font-medium">
+                            active
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="space-y-2">
                 <div className="flex justify-between items-center text-gray-400 text-[12px]">
                   <span>Amount</span>
@@ -591,16 +883,18 @@ const onBorrow = async () => {
                     placeholder="0.00"
                   />
                   <span className="text-gray-500 text-xs ml-2">
-                    {actionPanel.asset}
+                    {selectedMarket}
                   </span>
                 </div>
 
                 <div className="text-[11px] text-gray-500 flex justify-between">
                   <span>$123.45</span>
                   <span className="text-[#8D8D8C] flex gap-1">
-                    Wallet Balance:{" "}
+                    {actionPanel.type === "withdraw"
+                      ? "Balance:"
+                      : "Wallet Balance:"}{" "}
                     <span className="text-white">
-                      {walletBalance} {actionPanel.asset}
+                      {walletBalance} {selectedMarket}
                     </span>
                   </span>
                 </div>
@@ -611,7 +905,7 @@ const onBorrow = async () => {
                 <div className="flex justify-between text-gray-400 text-[12px]">
                   <span>Amount ({healthPct.toFixed(0)}%)</span>
                   <span className="text-gray-500">
-                    {amount.toFixed(4)} {actionPanel.asset}
+                    {amount.toFixed(4)} {selectedMarket}
                   </span>
                 </div>
 
@@ -719,7 +1013,7 @@ const onBorrow = async () => {
                             <span>{opt}</span>
                           </span>
 
-                          {selectedMarket === opt && (
+                          {selectedBorrowMarket === opt && (
                             <span className="text-[11px] text-emerald-400 font-medium">
                               active
                             </span>
@@ -753,7 +1047,7 @@ const onBorrow = async () => {
                       placeholder="0.00"
                     />
                     <span className="text-gray-500 text-xs ml-2">
-                      {actionPanel.asset}
+                      {selectedBorrowMarket}
                     </span>
                   </div>
 
@@ -762,7 +1056,7 @@ const onBorrow = async () => {
                     <span className="text-[#8D8D8C] flex gap-1">
                       Available Balance:{" "}
                       <span className="text-white">
-                        {walletBalance} {actionPanel.asset}
+                        {walletBalance} {selectedBorrowMarket}
                       </span>
                     </span>
                   </div>
@@ -773,7 +1067,7 @@ const onBorrow = async () => {
                   <div className="flex justify-between text-gray-400 text-[12px]">
                     <span>Borrow Amount ({borrowPct.toFixed(0)}%)</span>
                     <span className="text-gray-500">
-                      {borrowAmount.toFixed(4)} {actionPanel.asset}
+                      {borrowAmount.toFixed(4)} {selectedBorrowMarket}
                     </span>
                   </div>
 
@@ -831,6 +1125,8 @@ const onBorrow = async () => {
               onApproveAndWithdraw();
             } else if (heading === "Borrow") {
               onBorrow();
+            }else if(heading==='Repay debt'){
+              onRepay()
             }
           }}
           disabled={!canDeposit && heading !== "Borrow"}

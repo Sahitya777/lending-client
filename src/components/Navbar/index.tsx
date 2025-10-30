@@ -269,7 +269,7 @@ const Navbar = () => {
             disabled={isLoading}
           >
             <TrendingUp />
-            Increase Leverage (5x)
+            Increase Leverage
           </Button>
 
           <ElectricBorder
@@ -305,7 +305,7 @@ const Navbar = () => {
             disabled={isLoading}
           >
             <TrendingUp />
-            Increase Leverage (5x)
+            Increase Leverage
           </Button>
 
           {/* Wallet pill + dropdown */}
