@@ -10,9 +10,11 @@ import more from "../../assets/icons/more.png";
 import Image from "next/image";
 import solicon from "../../assets/cryptoIcons/solana-sol-logo.png";
 import { TrendingUp } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useToast } from "@/hooks/useToast";
 import TestTokensModal from "../Modals/token-modal";
+import { PublicKey } from "@solana/web3.js";
+import { isSolanaWallet } from "@dynamic-labs/solana";
 
 const prettyLabel = (slug: string) => {
   if (!slug) return "";
@@ -251,18 +253,9 @@ const Navbar = () => {
         </div>
         {title.name}
       </div>
-      <TestTokensModal openModal={openModal} setOpenModal={setopenModal}/>
 
       {!user ? (
         <div className="flex gap-2 items-center">
-          <Button
-            className="bg-transparent text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
-            onClick={() => {
-              setopenModal(true);
-            }}
-          >
-            Get Test Tokens
-          </Button>
           <Button
             className="flex gap-2 cursor-pointer bg-[#FECD6D] text-black hover:bg-[#fece6dd5]"
             onClick={handleCreateLink}
@@ -291,14 +284,6 @@ const Navbar = () => {
       ) : (
         <div className="flex gap-2 items-center relative">
           {/* Leverage button stays the same */}
-          <Button
-            className="bg-transparent text-white cursor-pointer border border-[#222222] h-8 px-3 text-xs font-medium"
-            onClick={() => {
-              setopenModal(true);
-            }}
-          >
-            Get Test Tokens
-          </Button>
           <Button
             className="flex gap-2 cursor-pointer bg-[#FECD6D] text-black hover:bg-[#fece6dd5]"
             onClick={handleCreateLink}

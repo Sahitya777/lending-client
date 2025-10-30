@@ -1,28 +1,59 @@
+// components/TestTokensModal.tsx
 import React, { useState } from "react";
 import ResponsiveModal from "./responsive-modal";
 import Image from "next/image";
 import { Button } from "../ui/button";
 import { markets } from "../MarketDashboard";
-
-// if you already have this in another file, import instead of redefining
+import { useToast } from "@/hooks/useToast";
 
 const TestTokensModal = ({
   openModal,
   setOpenModal,
+  connectedPubkey, // <--- pass this from parent (string or null)
 }: {
   openModal: boolean;
   setOpenModal: React.Dispatch<React.SetStateAction<boolean>>;
+  connectedPubkey: string | null;
 }) => {
   const [isMinting, setIsMinting] = useState<string | null>(null);
+  const { toast } = useToast();
+  const handleMint = async (tokenName: string, mintAddress: string) => {
+    if (!connectedPubkey) {
+      alert("Please connect your wallet first.");
+      return;
+    }
 
-  // call your faucet / mint instruction etc here
-  const handleMint = async (tokenSymbol: string, mintAddress: string) => {
     try {
-      setIsMinting(tokenSymbol);
-      // TODO: hook up on-chain mint / faucet logic
-      // await mintTestToken({ mintAddress })
+      setIsMinting(tokenName);
+      const resp = await fetch("/api/mint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mintAddress,
+          amount: 10, // mint 1 token (floating allowed, server multiplies by decimals)
+          recipient: connectedPubkey,
+        }),
+      });
+
+      const json = await resp.json();
+      if (!resp.ok) {
+        console.error("mint error", json);
+      } else {
+        toast({
+          title: "Mint Successfull",
+          description: `10 ${tokenName} have been minted successfully to your account`,
+        });
+        setOpenModal(false)
+        // alert(`Mint success. tx: ${json.signature}`);
+        // optionally refresh UI, fetch token balances, etc.
+      }
     } catch (err) {
-      console.error("mint failed for", tokenSymbol, err);
+      console.error("mint failed for", tokenName, err);
+      toast({
+        title: "Mint Failed",
+        description: `Your withdraw has failed ${err}`,
+        variant: "destructive",
+      });
     } finally {
       setIsMinting(null);
     }
@@ -36,14 +67,12 @@ const TestTokensModal = ({
             Get Test Tokens
           </h2>
 
-          {/* token cards row */}
           <div className="flex flex-col gap-4 sm:flex-row sm:gap-3">
             {markets.map((token) => (
               <div
                 key={token.name}
                 className="flex flex-1 flex-col justify-between border border-[#494B4E] rounded-[10px] p-4 bg-[#0F0F10] min-w-0"
               >
-                {/* top section: icon + ticker */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="w-8 h-8 relative shrink-0">
@@ -65,7 +94,6 @@ const TestTokensModal = ({
                   </div>
                 </div>
 
-                {/* CTA */}
                 <Button
                   disabled={isMinting === token.name}
                   onClick={() => handleMint(token.name, token.mintAddress)}
@@ -76,7 +104,6 @@ const TestTokensModal = ({
                     : `Get ${token.name}`}
                 </Button>
 
-                {/* helper text */}
                 <p className="text-[10px] text-[#A4A4AE] text-center mt-2 leading-snug">
                   Faucet mint to your connected wallet.
                 </p>
@@ -84,7 +111,6 @@ const TestTokensModal = ({
             ))}
           </div>
 
-          {/* optional footer / disclaimer */}
           <p className="text-[11px] text-[#6B6B76] text-center leading-relaxed px-4">
             These are testnet tokens only. They have no real-world value.
           </p>

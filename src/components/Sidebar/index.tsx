@@ -6,9 +6,12 @@ import SplitText from "@/components/SplitText";
 import { Button } from "@/components/ui/button";
 import { GoPin } from "react-icons/go";
 import { cn } from "@/lib/utils";
-import { Connection, clusterApiUrl } from "@solana/web3.js";
+import { Connection, PublicKey, clusterApiUrl } from "@solana/web3.js";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import TestTokensModal from "../Modals/token-modal";
+import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
+import { isSolanaWallet } from "@dynamic-labs/solana";
 
 const PIN_KEY = "ui.sidebar.pinned";
 
@@ -18,6 +21,7 @@ export default function Sidebar() {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(PIN_KEY) === "1";
   });
+  const [openModal, setopenModal] = useState(false);
 
   const [expanded, setExpanded] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -53,6 +57,9 @@ export default function Sidebar() {
     []
   );
 
+    const { setShowAuthFlow, handleLogOut, user, primaryWallet } =
+      useDynamicContext();
+
   useEffect(() => {
     let alive = true;
     async function getLatestBlockHeight() {
@@ -74,6 +81,24 @@ export default function Sidebar() {
       clearInterval(id);
     };
   }, [connection]);
+
+    const [pubkey, setPubkey] = useState<PublicKey | null>(null);
+  
+      useEffect(() => {
+        if (
+          primaryWallet &&
+          isSolanaWallet(primaryWallet) &&
+          primaryWallet.address
+        ) {
+          try {
+            setPubkey(new PublicKey(primaryWallet.address));
+          } catch {
+            setPubkey(null);
+          }
+        } else {
+          setPubkey(null);
+        }
+      }, [primaryWallet]);
 
   // --- Sidebar nav data ---
   const sideBaritems = [
@@ -642,7 +667,7 @@ export default function Sidebar() {
             // const isActive = item.href && pathname === item.href;
             const isHovered = docHoverIndex === i;
 
-            const showHoverIcon = isHovered
+            const showHoverIcon = isHovered;
 
             return (
               <button
@@ -680,7 +705,36 @@ export default function Sidebar() {
             );
           })}
         </nav>
-        <div className="border-t border-[#2a2a2a] mx-4" />
+        <div className="border-t border-[#2a2a2a] mx-4 mt-2" />
+        <nav className="space-y-2 mt-2 px-4">
+          <div
+            className={cn(
+              "flex  items-center gap-2 w-full px-3 py-2 rounded-md cursor-pointer transition-colors",
+              expanded ? "justify-start" : "justify-center",
+              "text-[#FCFCFC]",
+              "hover:bg-[#1F1F1F] hover:text-white"
+            )}
+            onClick={()=>{
+              setopenModal(true)
+            }}
+          >
+            <div className="bg-[#0D0D0D] p-2 rounded-md flex items-center justify-center">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 18 18"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M13.9577 3.94383C13.1091 2.48906 11.9475 1.6875 10.6875 1.6875H7.3125C6.0525 1.6875 4.89094 2.48906 4.04227 3.94383C3.24914 5.30297 2.8125 7.10156 2.8125 9C2.8125 10.8984 3.24914 12.697 4.04227 14.0562C4.89094 15.5109 6.0525 16.3125 7.3125 16.3125H10.6875C11.9475 16.3125 13.1091 15.5109 13.9577 14.0562C14.7509 12.697 15.1875 10.8984 15.1875 9C15.1875 7.10156 14.7509 5.30297 13.9577 3.94383ZM14.0477 8.4375H11.7977C11.7538 7.28322 11.524 6.14359 11.1171 5.0625H13.268C13.6983 6.00328 13.9823 7.17188 14.0477 8.4375ZM12.5993 3.9375H10.5792C10.3443 3.52991 10.061 3.15218 9.73547 2.8125H10.6875C11.3906 2.8125 12.0516 3.23438 12.5993 3.9375ZM3.9375 9C3.9375 5.64609 5.48438 2.8125 7.3125 2.8125C9.14062 2.8125 10.6875 5.64609 10.6875 9C10.6875 12.3539 9.14062 15.1875 7.3125 15.1875C5.48438 15.1875 3.9375 12.3539 3.9375 9ZM10.6875 15.1875H9.73758C10.0631 14.8478 10.3464 14.4701 10.5813 14.0625H12.6014C12.0516 14.7656 11.3906 15.1875 10.6875 15.1875ZM13.268 12.9375H11.1178C11.5247 11.8564 11.7545 10.7168 11.7984 9.5625H14.0484C13.9823 10.8281 13.6983 11.9967 13.268 12.9375Z"
+                  fill="white"
+                />
+              </svg>
+            </div>
+            Get Tokens
+          </div>
+        </nav>
       </div>
 
       {/* Bottom status row */}
@@ -696,6 +750,7 @@ export default function Sidebar() {
               : "loading"
           }
         />
+         <TestTokensModal openModal={openModal} setOpenModal={setopenModal} connectedPubkey={pubkey as any}/>
         {expanded && (
           <Link
             href={`https://explorer.solana.com/block/${blockHeight}?cluster=testnet`}
