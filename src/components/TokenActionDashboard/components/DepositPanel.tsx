@@ -271,10 +271,10 @@ export default function DepositPanel({
         setBalance(await fetchSplTokenBalance(pubkey, NATIVE_MINT));
       } catch (sendErr: any) {
         // if it's a SendTransactionError, pull logs
-        if (sendErr instanceof SendTransactionError) {
-          const logs = await sendErr.getLogs(connection);
-          console.error("SendTransactionError logs:", logs);
-        }
+        // if (sendErr instanceof SendTransactionError) {
+        //   const logs = await sendErr.getLogs(connection);
+        //   console.error("SendTransactionError logs:", logs);
+        // }
         throw sendErr;
       }
     } catch (err) {
@@ -348,10 +348,10 @@ export default function DepositPanel({
         // 8. refresh balances
         setBalance(await fetchSplTokenBalance(pubkey, NATIVE_MINT));
       } catch (sendErr: any) {
-        if (sendErr instanceof SendTransactionError) {
-          const logs = await sendErr.getLogs(connection);
-          console.error("SendTransactionError logs (withdraw):", logs);
-        }
+        // if (sendErr instanceof SendTransactionError) {
+        //   const logs = await sendErr.getLogs(connection);
+        //   console.error("SendTransactionError logs (withdraw):", logs);
+        // }
         throw sendErr;
       }
     } catch (err) {
