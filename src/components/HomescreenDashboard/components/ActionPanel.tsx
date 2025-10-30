@@ -43,7 +43,7 @@ export function ActionPanel({
     availableBorrowBalance?: number;
     marketRows?: any[];
   };
-  livePricesBySymbol:Record<string, number>
+  livePricesBySymbol: Record<string, number>;
   onClose: () => void;
 }) {
   const prettyTitleMap: Record<string, string> = {
@@ -54,7 +54,7 @@ export function ActionPanel({
     addCollateral: "Add collateral",
     borrow: "Borrow",
   };
-  console.log(livePricesBySymbol,'prices')
+  console.log(actionPanel, "prices");
 
   const heading = prettyTitleMap[actionPanel.type] || "Action";
   const isSpend = actionPanel.type === "spend";
@@ -93,7 +93,6 @@ export function ActionPanel({
   const [selectedBorrowMarket, setSelectedBorrowMarket] = useState<string>(
     actionPanel.asset
   );
-  
 
   const computeAvailable = (m: any) => {
     const decimals = getDecimalsBySymbol(m.name);
@@ -135,7 +134,16 @@ export function ActionPanel({
   const [showSupplyMarketMenu, setshowSupplyMarketMenu] = useState(false);
   const marketRef = useRef<HTMLDivElement | null>(null);
   const canDeposit = !!pubkey && amount !== 0 && Number(amount) > 0 && !busy;
-  const canBorrow=!!pubkey && amount !== 0 && Number(amount) > 0 && !busy &&borrowAmount!==0 &&Number(borrowAmount)
+  const canBorrow =
+    !!pubkey &&
+    amount !== 0 &&
+    Number(amount) > 0 &&
+    !busy &&
+    borrowAmount !== 0 &&
+    Number(borrowAmount) &&
+    (Number(selectedMarketRow.maxLtv) / 100)*amount * livePricesBySymbol[selectedMarket] >
+        borrowAmount *
+        livePricesBySymbol[selectedBorrowMarket];
   // ---------- TX HANDLERS (unchanged) ----------
 
   const resetStates = () => {
@@ -651,7 +659,8 @@ export function ActionPanel({
 
       setBorrowAmount(amt);
 
-      const pct = borrowwalletBalance > 0 ? (amt / borrowwalletBalance) * 100 : 0;
+      const pct =
+        borrowwalletBalance > 0 ? (amt / borrowwalletBalance) * 100 : 0;
       setBorrowPct(pct);
     },
     [borrowwalletBalance]
@@ -764,7 +773,10 @@ export function ActionPanel({
             {heading}
           </div>
           <div className="text-lg font-semibold text-white flex items-center gap-2">
-            {heading} {actionPanel.type==='borrow'?selectedBorrowMarket: selectedMarket}
+            {heading}{" "}
+            {actionPanel.type === "borrow"
+              ? selectedBorrowMarket
+              : selectedMarket}
           </div>
           <div className="text-[11px] text-gray-500 mt-1">
             Supplied balance: {numberFormatter(balance)} {selectedMarket}
@@ -826,8 +838,8 @@ export function ActionPanel({
                     className="border border-[#2a2a2a] bg-transparent rounded-md h-8 w-8 flex items-center justify-center cursor-pointer hover:bg-[#2a2a2a] transition"
                     onClick={() => {
                       // toggle this dropdown, close the other
-                      if(actionPanel.type==='repay'){
-                      }else{
+                      if (actionPanel.type === "repay") {
+                      } else {
                         setshowSupplyMarketMenu((open) => !open);
                       }
                     }}
@@ -908,7 +920,12 @@ export function ActionPanel({
                 </div>
 
                 <div className="text-[11px] text-gray-500 flex justify-between">
-                  <span>${numberFormatter(livePricesBySymbol[selectedMarket]*amount)}</span>
+                  <span>
+                    $
+                    {numberFormatter(
+                      livePricesBySymbol[selectedMarket] * amount
+                    )}
+                  </span>
                   <span className="text-[#8D8D8C] flex gap-1">
                     {actionPanel.type === "withdraw"
                       ? "Balance:"
@@ -1072,7 +1089,12 @@ export function ActionPanel({
                   </div>
 
                   <div className="text-[11px] text-gray-500 flex justify-between">
-                    <span>${numberFormatter(livePricesBySymbol[selectedBorrowMarket]*borrowAmount)}</span>
+                    <span>
+                      $
+                      {numberFormatter(
+                        livePricesBySymbol[selectedBorrowMarket] * borrowAmount
+                      )}
+                    </span>
                     <span className="text-[#8D8D8C] flex gap-1">
                       Available Balance:{" "}
                       <span className="text-white">
@@ -1149,7 +1171,7 @@ export function ActionPanel({
               onRepay();
             }
           }}
-          disabled={heading==='Borrow'?!canBorrow: !canDeposit}
+          disabled={heading === "Borrow" ? !canBorrow : !canDeposit}
         >
           {busy ? "Processing..." : heading}
         </Button>
