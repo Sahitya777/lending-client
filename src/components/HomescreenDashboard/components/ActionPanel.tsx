@@ -3,6 +3,7 @@ import { SpendContent } from "./SpendContent";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { isSolanaWallet } from "@dynamic-labs/solana";
 import {
+  Keypair,
   PublicKey,
   SendTransactionError,
   Transaction,
@@ -29,6 +30,7 @@ import { getDecimalsBySymbol } from "@/utils/token";
 import numberFormatter from "@/utils/numberFormatter";
 import { useAtomValue, useSetAtom } from "jotai";
 import { txExecuted } from "@/atoms/dataloaderatom";
+import { bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
 
 export function ActionPanel({
   actionPanel,
@@ -141,9 +143,10 @@ export function ActionPanel({
     !busy &&
     borrowAmount !== 0 &&
     Number(borrowAmount) &&
-    (Number(selectedMarketRow.maxLtv) / 100)*amount * livePricesBySymbol[selectedMarket] >
-        borrowAmount *
-        livePricesBySymbol[selectedBorrowMarket];
+    (Number(selectedMarketRow.maxLtv) / 100) *
+      amount *
+      livePricesBySymbol[selectedMarket] >
+      borrowAmount * livePricesBySymbol[selectedBorrowMarket];
   // ---------- TX HANDLERS (unchanged) ----------
 
   const resetStates = () => {
@@ -293,6 +296,26 @@ export function ActionPanel({
   };
 
   // app config you MUST fill with real addresses from your bootstrap script
+  function getKeeperKeypair(): Keypair {
+    const json = process.env.NEXT_PUBLIC_KEEPER_KEY_JSON!;
+    console.log(json, "json");
+    let secret: Uint8Array | null = null;
+
+    const arr = JSON.parse(json) as number[];
+    if (!Array.isArray(arr) || arr.some((n) => typeof n !== "number")) {
+      throw new Error("JSON must be an array of numbers");
+    }
+    secret = new Uint8Array(arr);
+    if (secret.length !== 64 && secret.length !== 32)
+      throw new Error(
+        `Keeper secret must be 32/64 bytes, got ${secret.length}`
+      );
+    return Keypair.fromSecretKey(secret);
+  }
+
+  const HERMES_URL = "https://hermes.pyth.network/";
+  const COMPUTE_UNIT_PRICE_U_LAMPORTS = 50_000; // tweak as needed
+
   const onBorrow = async () => {
     if (!primaryWallet || !isSolanaWallet(primaryWallet) || !pubkey) {
       setShowAuthFlow(true);
@@ -305,95 +328,80 @@ export function ActionPanel({
     try {
       const collateralVal = Number(amount);
       const borrowVal = Number(borrowAmount);
-
       if (collateralVal <= 0) throw new Error("Enter valid collateral");
       if (borrowVal <= 0) throw new Error("Enter valid borrow amount");
 
-      // 1. connection
+      // 1) connection + basics
       const connection = getConnection();
-
       const collateralMintPk = new PublicKey(supplyMint);
       const borrowMintPk = new PublicKey(borrowMint);
-      const signer = await primaryWallet.getSigner();
-      // 3. prep wallet adapter for PythSolanaReceiver
-      // PythSolanaReceiver expects an Anchor-style wallet with `publicKey`
-      // and signing capability. We'll proxy the connected wallet.
-      // primaryWallet.getSigner() is app-specific in your code, adjust if needed.
+      const userSigner = await primaryWallet.getSigner();
 
-      const anchorishWallet = {
-        publicKey: pubkey,
-        // signAllTransactions is what many Anchor-style flows call;
-        // if your signer only has signTransaction, we can lift it.
+      // ----------------------------
+      // A) POST PYTH PRICE UPDATES using KEEPER wallet (NOT the user wallet)
+      // ----------------------------
+      const keeper = getKeeperKeypair();
+
+      // Anchor-ish wallet for Pyth receiver that signs with the keeper key
+      const keeperWallet = {
+        publicKey: keeper.publicKey,
         signAllTransactions: async (txs: VersionedTransaction[]) => {
-          const signed: VersionedTransaction[] = [];
-          for (const tx of txs) {
-            const stx = await (signer as any).signTransaction(tx); // wallet adapter compat
-            signed.push(stx);
-          }
-          return signed;
+          for (const tx of txs) tx.sign([keeper]);
+          return txs;
         },
-      };
+      } as any;
 
-      // 4. init Pyth receiver
       const pythSolanaReceiver = new PythSolanaReceiver({
         connection,
-        wallet: anchorishWallet as any,
+        wallet: keeperWallet,
       });
 
-      const solUsdPriceFeedAccount = pythSolanaReceiver
-        .getPriceFeedAccountAddress(
-          0,
-          "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d"
-        )
-        .toBase58();
+      // Feed IDs
+      const SOL_USD_FEED =
+        "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d";
+      const USDT_USD_FEED =
+        "2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b";
+      const USDC_USD_FEED =
+        "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a";
 
-      const usdtUsdPriceFeedAccount = pythSolanaReceiver
-        .getPriceFeedAccountAddress(
-          0,
-          "2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b"
-        )
-        .toBase58();
-
-      const usdcUsdPriceFeedAccount = pythSolanaReceiver
-        .getPriceFeedAccountAddress(
-          0,
-          "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a"
-        )
-        .toBase58();
-
-      const hermes = new HermesClient("https://hermes.pyth.network/");
-      console.log(
-        "Fetching price updates from Hermes for SOL and USDT feeds..."
-      );
+      // (1) fetch latest price updates
+      const hermes = new HermesClient(HERMES_URL);
       const priceUpdatePayload = (
         await hermes.getLatestPriceUpdates(
-          [
-            "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
-            "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a",
-          ],
-          { encoding: "base64" }
+          [SOL_USD_FEED, USDC_USD_FEED /* add USDT if you actually use it */],
+          {
+            encoding: "base64",
+          }
         )
       ).binary.data;
 
-      // For now we'll stub:
-
-      // 6. start tx builder (decide if you want rent reclaim)
-      const transactionBuilder = pythSolanaReceiver.newTransactionBuilder({
+      // (2) build and send post-price-updates with keeper
+      const txBuilder = pythSolanaReceiver.newTransactionBuilder({
         closeUpdateAccounts: false,
       });
-
-      // 7. add Pyth "post price update" instructions for those feeds
-      await transactionBuilder.addPostPriceUpdates(priceUpdatePayload);
-      const freshVersionedTxs =
-        await transactionBuilder.buildVersionedTransactions({
-          computeUnitPriceMicroLamports: 50_000,
-        });
-      await pythSolanaReceiver.provider.sendAll(freshVersionedTxs, {
+      await txBuilder.addPostPriceUpdates(priceUpdatePayload);
+      const keeperVtxs = await txBuilder.buildVersionedTransactions({
+        computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE_U_LAMPORTS,
+      });
+      // sends with keeper wallet (provider is bound to keeperWallet)
+      await pythSolanaReceiver.provider.sendAll(keeperVtxs, {
         skipPreflight: true,
       });
 
-      // 8. now add YOUR borrow instruction(s),
-      // wired with the Pyth price update accounts.
+      // Derive the price update accounts (no network call)
+      const solUsdPriceFeedAccount = pythSolanaReceiver
+        .getPriceFeedAccountAddress(0, SOL_USD_FEED)
+        .toBase58();
+      const usdcUsdPriceFeedAccount = pythSolanaReceiver
+        .getPriceFeedAccountAddress(0, USDC_USD_FEED)
+        .toBase58();
+      const usdtUsdPriceFeedAccount = pythSolanaReceiver
+        .getPriceFeedAccountAddress(0, USDT_USD_FEED)
+        .toBase58();
+
+      // ----------------------------
+      // B) BUILD + SIGN USER BORROW TX (single tx for the user)
+      // ----------------------------
       const { ix } = await buildBorrowTx({
         borrower: pubkey,
         collateralMint: collateralMintPk,
@@ -417,27 +425,41 @@ export function ActionPanel({
 
       const { blockhash, lastValidBlockHeight } =
         await connection.getLatestBlockhash("finalized");
-
       const freshTx = new Transaction();
       freshTx.add(ix);
       freshTx.feePayer = pubkey;
       freshTx.recentBlockhash = blockhash;
       (freshTx as any)._lastValidBlockHeight = lastValidBlockHeight;
 
-      const signedTx = await signer.signTransaction(freshTx as any);
+      const signedTx = await userSigner.signTransaction(freshTx as any);
+      // Optionally send the user tx:
+      // const sig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: true });
+      // setTxSig(sig);
+
+      // UI updates
       try {
         setBalance(
           await fetchSplTokenBalance(pubkey, new PublicKey(supplyMint))
         );
         resetStates();
         settxExecute(!txvalue);
+        toast({
+          title: "Borrow Successfull",
+          description: `You have successfully borrowed ${borrowAmount} ${selectedBorrowMarket}`,
+        });
       } catch (sendErr: any) {
         if (sendErr instanceof SendTransactionError) {
+          // handle/log if needed
         }
         throw sendErr;
       }
     } catch (err) {
-      console.error(err, "err in borro");
+      console.error(err, "err in borrow");
+      toast({
+        title: "Borrow Failed",
+        description: `Your borrow has failed ${err}`,
+        variant: "destructive",
+      });
     } finally {
       setBusy(false);
     }
@@ -508,7 +530,12 @@ export function ActionPanel({
         throw sendErr;
       }
     } catch (err) {
-      console.error(err);
+      console.error(err, "err in repay");
+      toast({
+        title: "Repay Failed",
+        description: `Your borrow repay has failed ${err}`,
+        variant: "destructive",
+      });
     } finally {
       setBusy(false);
     }
