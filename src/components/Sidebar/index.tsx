@@ -497,7 +497,7 @@ export default function Sidebar() {
         </svg>
       ),
       label: "Documentation",
-      href: "https://owl-finance.gitbook.io/owl-finance-docs",
+      href: "https://owlfi.gitbook.io/owlfi-docs",
     },
   ];
 
