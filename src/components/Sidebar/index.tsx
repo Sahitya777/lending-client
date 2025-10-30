@@ -732,7 +732,7 @@ export default function Sidebar() {
                 />
               </svg>
             </div>
-            Get Tokens
+            {expanded &&"Get Tokens"}
           </div>
         </nav>
       </div>
