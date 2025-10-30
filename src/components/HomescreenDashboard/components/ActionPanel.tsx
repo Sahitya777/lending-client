@@ -135,6 +135,7 @@ export function ActionPanel({
   const [showSupplyMarketMenu, setshowSupplyMarketMenu] = useState(false);
   const marketRef = useRef<HTMLDivElement | null>(null);
   const canDeposit = !!pubkey && amount !== 0 && Number(amount) > 0 && !busy;
+  const canBorrow=!!pubkey && amount !== 0 && Number(amount) > 0 && !busy &&borrowAmount!==0 &&Number(borrowAmount)
   // ---------- TX HANDLERS (unchanged) ----------
 
   const resetStates = () => {
@@ -763,7 +764,7 @@ export function ActionPanel({
             {heading}
           </div>
           <div className="text-lg font-semibold text-white flex items-center gap-2">
-            {heading} {selectedMarket}
+            {heading} {actionPanel.type==='borrow'?selectedBorrowMarket: selectedMarket}
           </div>
           <div className="text-[11px] text-gray-500 mt-1">
             Supplied balance: {numberFormatter(balance)} {selectedMarket}
@@ -825,7 +826,10 @@ export function ActionPanel({
                     className="border border-[#2a2a2a] bg-transparent rounded-md h-8 w-8 flex items-center justify-center cursor-pointer hover:bg-[#2a2a2a] transition"
                     onClick={() => {
                       // toggle this dropdown, close the other
-                      setshowSupplyMarketMenu((open) => !open);
+                      if(actionPanel.type==='repay'){
+                      }else{
+                        setshowSupplyMarketMenu((open) => !open);
+                      }
                     }}
                   >
                     <ChevronDownIcon
@@ -1145,7 +1149,7 @@ export function ActionPanel({
               onRepay();
             }
           }}
-          disabled={!canDeposit && heading !== "Borrow"}
+          disabled={heading==='Borrow'?!canBorrow: !canDeposit}
         >
           {busy ? "Processing..." : heading}
         </Button>
